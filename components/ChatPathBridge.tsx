@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useRpc } from "@get-bb/plugin-sdk/app";
+import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { mountChatPathButtons } from "@/lib/chat-path-buttons";
 import type { rpcContract } from "../contract";
 
@@ -16,6 +16,7 @@ import type { rpcContract } from "../contract";
  */
 export function ChatPathBridge({ threadId }: { threadId: string }) {
   const rpc = useRpc<typeof rpcContract>();
+  const navigate = useBbNavigate();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -25,12 +26,27 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
         const { known } = await rpc.call("resolvePaths", { threadId, paths });
         return new Set(known);
       },
+      async (anchors) => {
+        const { fixes } = await rpc.call("resolveFileAnchors", {
+          threadId,
+          anchors,
+        });
+        return fixes;
+      },
+      (fix) => {
+        // The file is named from another project as often as from this one, so
+        // it is addressed by host and absolute path rather than by workspace.
+        navigate.experimental_openFilePreview({
+          target: { kind: "host", hostId: fix.hostId, path: fix.absolutePath },
+          location: null,
+        });
+      },
       (message) => {
         void rpc.call("clientLog", { message }).catch(() => undefined);
       },
     );
     return () => controller.abort();
-  }, [rpc, threadId]);
+  }, [navigate, rpc, threadId]);
 
   return null;
 }

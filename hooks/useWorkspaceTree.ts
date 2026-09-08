@@ -15,12 +15,19 @@ function ancestorChain(relativePath: string): string[] {
   return chain;
 }
 
+/** Where a reveal landed, so the caller can open the file it just selected. */
+export interface Revealed {
+  workspace: Workspace;
+  relativePath: string;
+  isDirectory: boolean;
+}
+
 type DirState =
   | { status: "loading" }
   | { status: "ready"; entries: TreeEntry[] }
   | { status: "error"; message: string };
 
-export function useWorkspaceTree(threadId: string | null) {
+export function useWorkspaceTree(threadId: string | null, projectId: string | null = null) {
   const rpc = useRpc<typeof rpcContract>();
   const { values, isLoading: settingsLoading } = useSettings();
   const showSkipped = values?.showSkipped === true;
@@ -37,7 +44,16 @@ export function useWorkspaceTree(threadId: string | null) {
   const loadWorkspace = useCallback(async () => {
     setRerooted(null);
     if (threadId === null) {
-      setWorkspace({ ok: false, reason: "no_thread" });
+      if (projectId === null) {
+        setWorkspace({ ok: false, reason: "no_thread" });
+        return;
+      }
+      try {
+        const result = await rpc.call("workspaceForProject", { projectId });
+        setWorkspace(result);
+      } catch {
+        setWorkspace({ ok: false, reason: "no_checkout" });
+      }
       return;
     }
     try {
@@ -46,7 +62,7 @@ export function useWorkspaceTree(threadId: string | null) {
     } catch {
       setWorkspace({ ok: false, reason: "no_checkout" });
     }
-  }, [rpc, threadId]);
+  }, [projectId, rpc, threadId]);
 
   const loadDir = useCallback(
     async (ws: Workspace, relativePath: string) => {
@@ -82,6 +98,10 @@ export function useWorkspaceTree(threadId: string | null) {
   /** The root actually on screen: a reveal may have moved it to another project. */
   const active: Workspace | null =
     rerooted ?? (workspace?.ok === true ? workspace.workspace : null);
+  // `reveal` is memoised on the rpc handle, so it reads the root on screen
+  // through a ref rather than closing over a stale one.
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const rootKey = active?.rootPath ?? "";
   useEffect(() => {
@@ -104,30 +124,32 @@ export function useWorkspaceTree(threadId: string | null) {
    * trying to expand the file itself.
    */
   const reveal = useCallback(
-    async (rawPath: string) => {
-      if (threadId === null) return;
+    async (rawPath: string, options?: { quiet?: boolean }): Promise<Revealed | null> => {
+      if (threadId === null) return null;
       let resolved;
       try {
         resolved = await rpc.call("resolveInWorkspace", { threadId, path: rawPath });
       } catch (cause) {
         toast.error(cause instanceof Error ? cause.message : String(cause));
-        return;
+        return null;
       }
       if (!resolved.ok) {
         toast.error(resolved.message);
-        return;
+        return null;
       }
       // Landing in another project replaces the root, so the previously
       // expanded folders describe a tree that is no longer on screen.
+      let landedIn = activeRef.current;
       if (resolved.root !== null) {
         const root = resolved.root;
-        setRerooted({
-          environmentId: "",
+        landedIn = {
+          environmentId: null,
           hostId: root.hostId,
           rootPath: root.rootPath,
           rootName: root.rootName,
-        });
-        toast.message(`Showing ${root.rootName}`);
+        };
+        setRerooted(landedIn);
+        if (options?.quiet !== true) toast.message(`Showing ${root.rootName}`);
       } else {
         setRerooted(null);
       }
@@ -139,6 +161,12 @@ export function useWorkspaceTree(threadId: string | null) {
           : new Set(toExpand),
       );
       setSelected(resolved.relativePath);
+      if (landedIn === null) return null;
+      return {
+        workspace: landedIn,
+        relativePath: resolved.relativePath,
+        isDirectory: resolved.isDirectory,
+      };
     },
     [rpc, threadId],
   );
@@ -168,6 +196,7 @@ export function useWorkspaceTree(threadId: string | null) {
     expanded,
     selected,
     setSelected,
+    reveal,
     toggleDir,
     reload: loadWorkspace,
   };

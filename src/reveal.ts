@@ -3,8 +3,14 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { SKIP_DIR_NAMES } from "../contract";
-import type { RevealResult, RevealRoot, Workspace } from "../contract";
-import { findByName } from "./name-index";
+import type {
+  AnchorFix,
+  RevealResult,
+  RevealRoot,
+  SearchHit,
+  Workspace,
+} from "../contract";
+import { findByName, searchByQuery } from "./name-index";
 import { resolveUnderRoot, toRelativePath } from "./paths";
 import { workspaceForThread } from "./workspace";
 
@@ -113,6 +119,7 @@ async function searchByName(
 ): Promise<Resolved | null> {
   const name = path.basename(relativePath);
   if (name === "" || !hasFileExtension(name)) return null;
+  if (workspace.environmentId === null) return null;
   let response;
   try {
     response = await bb.sdk.environments.paths({
@@ -201,6 +208,54 @@ export async function resolveInWorkspace(
   return { ok: false, message: `Not found in any project: ${input.path}` };
 }
 
+/**
+ * Find a file by what the user typed into the tree's search box.
+ *
+ * The tree's own root is searched alongside the configured roots — a thread
+ * checkout is the first place a typed name is likely to live, and
+ * `candidateRoots` deliberately leaves it out because its job is finding
+ * what is *not* here.
+ *
+ * A hit is handed back as an absolute path, so selecting one goes through
+ * exactly the same reveal a path clicked in chat does, re-rooting included.
+ */
+export async function searchFiles(
+  bb: BbPluginApi,
+  input: { threadId: string; query: string; limit: number },
+  getSearchRoots: SearchRootsGetter,
+): Promise<{ hits: SearchHit[] }> {
+  const result = await workspaceForThread(bb, input.threadId);
+  if (!result.ok) return { hits: [] };
+  const workspace = result.workspace;
+
+  const here: RevealRoot = {
+    hostId: workspace.hostId,
+    rootPath: workspace.rootPath,
+    rootName: workspace.rootName,
+  };
+  const roots = [
+    here,
+    ...(await candidateRoots(
+      bb,
+      workspace.rootPath,
+      workspace.hostId,
+      getSearchRoots,
+    )),
+  ];
+
+  const found = await searchByQuery(roots, input.query, input.limit);
+  return {
+    hits: found
+      .filter((hit) => !isHidden(hit.relativePath))
+      .map((hit) => ({
+        name: hit.name,
+        relativePath: hit.relativePath,
+        absolutePath: hit.absolutePath,
+        rootName: hit.root.rootName,
+      })),
+  };
+}
+
 /** The subset of `paths` that resolves to something in the workspace. */
 export async function resolvePaths(
   bb: BbPluginApi,
@@ -226,6 +281,92 @@ export async function resolvePaths(
   });
   const settled = await Promise.all(checks);
   return { known: settled.filter((value): value is string => value !== null) };
+}
+
+async function pathExists(absolutePath: string): Promise<boolean> {
+  try {
+    await stat(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function absoluteUnder(rootPath: string, relativePath: string): string | null {
+  try {
+    return resolveUnderRoot(rootPath, relativePath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Repair chat links that bb aimed at nothing.
+ *
+ * bb turns a path written in a message into a link relative to the thread's
+ * workspace root, without asking whether anything is there. A thread running
+ * in an empty personal workspace therefore links `AGENTS-base.md` to
+ * `<workspace>/AGENTS-base.md`, and clicking it opens a preview of a file that
+ * has never existed.
+ *
+ * A link whose target is really on disk is left alone — bb is right about it,
+ * and taking the click over would only risk breaking a working one. Only the
+ * dead ones are answered, with the file the same text names, found by the same
+ * search a reveal uses.
+ */
+export async function resolveFileAnchors(
+  bb: BbPluginApi,
+  input: {
+    threadId: string;
+    anchors: readonly { text: string; href: string }[];
+  },
+  getSearchRoots: SearchRootsGetter,
+): Promise<{ fixes: AnchorFix[] }> {
+  const result = await workspaceForThread(bb, input.threadId);
+  if (!result.ok) return { fixes: [] };
+  const workspace = result.workspace;
+
+  const checks = input.anchors.map(async (anchor): Promise<AnchorFix | null> => {
+    if (await pathExists(anchor.href)) return null;
+
+    const here = await resolveOne(bb, workspace, anchor.text);
+    if (here !== null) {
+      const absolutePath = absoluteUnder(workspace.rootPath, here.relativePath);
+      if (absolutePath === null || absolutePath === anchor.href) return null;
+      return {
+        text: anchor.text,
+        href: anchor.href,
+        absolutePath,
+        hostId: workspace.hostId,
+        isDirectory: here.isDirectory,
+      };
+    }
+
+    const elsewhere = await findOutsideWorkspace(
+      bb,
+      workspace.rootPath,
+      workspace.hostId,
+      anchor.text,
+      getSearchRoots,
+    );
+    if (elsewhere === null) return null;
+    const absolutePath = absoluteUnder(
+      elsewhere.root.rootPath,
+      elsewhere.relativePath,
+    );
+    if (absolutePath === null) return null;
+    return {
+      text: anchor.text,
+      href: anchor.href,
+      absolutePath,
+      hostId: elsewhere.root.hostId,
+      isDirectory: elsewhere.isDirectory,
+    };
+  });
+  const settled = await Promise.all(checks);
+  return {
+    fixes: settled.filter((fix): fix is AnchorFix => fix !== null),
+  };
 }
 
 /**
