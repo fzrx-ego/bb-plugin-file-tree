@@ -5,7 +5,7 @@ A [BB](https://getbb.app) plugin that shows a compact file tree of the thread wo
 ## Install
 
 ```
-bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.10.1
+bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.13.1
 ```
 
 Or search **File Tree** in BB Community.
