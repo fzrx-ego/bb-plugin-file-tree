@@ -27,12 +27,10 @@ const FIXED_ATTR = "data-file-tree-fixed";
 // The app chrome uses the same inline elements as rendered Markdown. Restrict
 // mutation to a message container so a workspace folder named "Settings" can
 // never decorate BB's sidebar settings control.
-const CHAT_MESSAGE_SELECTOR = [
-  "[data-message-id]",
-  "[data-thread-message-id]",
-  "[data-bb-message]",
-  "[data-testid*='message']",
-].join(",");
+// BB marks the rendered body of a conversation message with this CSS class.
+// Keep the scanner scoped to that subtree: sidebar/footer controls can contain
+// ordinary text or a `file:` link as well, but must never receive a reveal button.
+const CHAT_MESSAGE_SELECTOR = ".group\\/message";
 
 function isChatContent(element: Element): boolean {
   return element.closest(CHAT_MESSAGE_SELECTOR) !== null;
