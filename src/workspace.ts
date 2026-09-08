@@ -53,7 +53,13 @@ export async function workspaceForProject(
   projectId: string,
   treeRoot?: string,
 ): Promise<WorkspaceResult> {
-  const project = await bb.sdk.projects.get({ projectId });
+  // The root composer supplies BB's implicit personal-project id. It is not
+  // available through `projects.get`; the SDK requires `includePersonal` for
+  // that metadata. Looking up every selected project this way keeps both new
+  // project threads and projectless/personal compose on the same code path.
+  const projectsIncludingPersonal = await bb.sdk.projects.list({ includePersonal: true });
+  const project = projectsIncludingPersonal.find((candidate) => candidate.id === projectId);
+  if (project === undefined) return { ok: false, reason: "no_checkout" };
   const usePersonalRoot = treeRoot !== undefined && project.kind === "personal";
   const source = project.sources.find((candidate) => candidate.isDefault) ?? project.sources[0];
 
@@ -61,10 +67,13 @@ export async function workspaceForProject(
     // Personal is a virtual project and deliberately has no source. Reuse the
     // host of any configured local project so its navigator can still browse
     // the configured Documents root before a thread/environment exists.
-    const projects = await bb.sdk.projects.list({ includePersonal: false });
-    const hostSource = projects
+    const standardProjects = projectsIncludingPersonal.filter(
+      (candidate) => candidate.kind !== "personal",
+    );
+    const hostSource = standardProjects
       .flatMap((candidate) => candidate.sources)
-      .find((candidate) => candidate.isDefault) ?? projects.flatMap((candidate) => candidate.sources)[0];
+      .find((candidate) => candidate.isDefault) ??
+      standardProjects.flatMap((candidate) => candidate.sources)[0];
     if (hostSource === undefined) return { ok: false, reason: "no_checkout" };
 
     const rootPath = path.resolve(expandHome(treeRoot));
