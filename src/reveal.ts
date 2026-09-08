@@ -4,6 +4,7 @@ import path from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { SKIP_DIR_NAMES } from "../contract";
 import type { RevealResult, RevealRoot, Workspace } from "../contract";
+import { findByName } from "./name-index";
 import { resolveUnderRoot, toRelativePath } from "./paths";
 import { workspaceForThread } from "./workspace";
 
@@ -319,9 +320,17 @@ export function makeSearchRootsGetter(
 }
 
 /**
- * The same widening search across every candidate root. Fuzzy name search is
- * skipped here — it is scoped to an environment, and a near-miss in an
- * unrelated folder would be a wild jump.
+ * The same widening search across every candidate root, plus one step the
+ * thread's own workspace gets for free from `bb.sdk.environments.paths`: a
+ * lookup by file name. Agents name `ru-text-hygiene.mdc` without a folder far
+ * more often than they spell the path out, and no amount of re-rooting can
+ * place a bare name by position alone.
+ *
+ * The name step sits between the exact matches and the ancestor guesses,
+ * because an existing file with that exact name is a better answer than the
+ * nearest folder some prefix happens to share. It only ever matches a full
+ * file name (and, for `rules/ru-text-hygiene.mdc`, a whole trailing run of
+ * segments), never a fuzzy near-miss.
  */
 async function findOutsideWorkspace(
   bb: BbPluginApi,
@@ -348,6 +357,9 @@ async function findOutsideWorkspace(
       }
     }
   }
+  const named = await findByName(roots, raw);
+  if (named !== null) return named;
+
   for (const root of roots) {
     const relativePath = toWorkspaceRelative(root.rootPath, raw);
     if (relativePath === null) continue;

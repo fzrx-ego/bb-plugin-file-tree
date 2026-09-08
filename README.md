@@ -14,7 +14,7 @@ Or search **File Tree** in BB Community.
 
 - Click a file to open BB's default preview.
 - Right-click to add the path to chat, copy a relative or absolute path, copy the file itself, or reveal it in Finder.
-- Paths written in chat can jump the tree to that file. Search roots (default `~/Documents`) cover folders outside the current checkout.
+- Paths written in chat can jump the tree to that file, and so do bare file names like `AGENTS-base.md`. Search roots (default `~/Documents`) cover folders outside the current checkout.
 
 Copy File uses the macOS or Windows file clipboard. Open in Finder uses macOS `open -R`.
 
