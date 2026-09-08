@@ -17,9 +17,26 @@
  */
 import { requestReveal } from "./reveal-bus";
 import { writeStoredOpen } from "./rail-state";
+import type { AnchorFix } from "../contract";
 
 const BUTTON_ATTR = "data-file-tree-reveal";
 const PATH_ATTR = "fileTreeRevealPath";
+/** Marks a chat link this module answers instead of bb. */
+const FIXED_ATTR = "data-file-tree-fixed";
+
+// The app chrome uses the same inline elements as rendered Markdown. Restrict
+// mutation to a message container so a workspace folder named "Settings" can
+// never decorate BB's sidebar settings control.
+const CHAT_MESSAGE_SELECTOR = [
+  "[data-message-id]",
+  "[data-thread-message-id]",
+  "[data-bb-message]",
+  "[data-testid*='message']",
+].join(",");
+
+function isChatContent(element: Element): boolean {
+  return element.closest(CHAT_MESSAGE_SELECTOR) !== null;
+}
 
 /**
  * A loose shape filter — anything that could plausibly name a file. Unicode
@@ -87,11 +104,34 @@ function makeButton(path: string): HTMLButtonElement {
 }
 
 export type PathValidator = (paths: string[]) => Promise<Set<string>>;
+export type AnchorResolver = (
+  anchors: { text: string; href: string }[],
+) => Promise<AnchorFix[]>;
+export type FixedOpener = (fix: AnchorFix) => void;
 export type Reporter = (message: string) => void;
+
+/** The filesystem path a `file://` link points at, or null for anything else. */
+function anchorTargetPath(anchor: HTMLAnchorElement): string | null {
+  const href = anchor.getAttribute("href") ?? "";
+  if (!href.startsWith("file:")) return null;
+  try {
+    const url = new URL(href);
+    if (url.host !== "") return null;
+    return decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+}
+
+function anchorKey(text: string, href: string): string {
+  return `${text}\n${href}`;
+}
 
 export function mountChatPathButtons(
   signal: AbortSignal,
   validate: PathValidator,
+  resolveAnchors: AnchorResolver,
+  openFixed: FixedOpener,
   report: Reporter = () => undefined,
 ): void {
   /** path → exists in the workspace. Absent means "not asked yet". */
@@ -109,6 +149,83 @@ export function mountChatPathButtons(
     code.appendChild(makeButton(path));
   };
 
+  /**
+   * key → the file bb's link should have pointed at, or null when bb's own
+   * link is fine (or nothing better exists) and the click stays bb's.
+   */
+  const anchorFixes = new Map<string, AnchorFix | null>();
+  const pendingAnchors = new Map<string, { text: string; href: string }>();
+  let anchorTimer: number | null = null;
+
+  const applyFix = (anchor: HTMLAnchorElement, fix: AnchorFix): void => {
+    anchor.setAttribute(FIXED_ATTR, "");
+    anchor.dataset.fileTreeFixedPath = fix.absolutePath;
+    anchor.dataset.fileTreeFixedHost = fix.hostId;
+    anchor.dataset.fileTreeFixedDir = fix.isDirectory ? "1" : "";
+    anchor.title = fix.absolutePath;
+  };
+
+  const clearFix = (anchor: HTMLAnchorElement): void => {
+    if (!anchor.hasAttribute(FIXED_ATTR)) return;
+    anchor.removeAttribute(FIXED_ATTR);
+    delete anchor.dataset.fileTreeFixedPath;
+    delete anchor.dataset.fileTreeFixedHost;
+    delete anchor.dataset.fileTreeFixedDir;
+  };
+
+  const sweepAnchors = (): void => {
+    for (const anchor of Array.from(
+      document.querySelectorAll<HTMLAnchorElement>('a[href^="file:"]'),
+    )) {
+      if (!isChatContent(anchor)) continue;
+      const href = anchorTargetPath(anchor);
+      const text = textOf(anchor);
+      if (href === null || text === "") {
+        clearFix(anchor);
+        continue;
+      }
+      const key = anchorKey(text, href);
+      const fix = anchorFixes.get(key);
+      if (fix === undefined) {
+        pendingAnchors.set(key, { text, href });
+        continue;
+      }
+      if (fix === null) clearFix(anchor);
+      else applyFix(anchor, fix);
+    }
+    if (pendingAnchors.size > 0) scheduleAnchorFlush();
+  };
+
+  const scheduleAnchorFlush = (): void => {
+    if (anchorTimer !== null) return;
+    anchorTimer = window.setTimeout(() => {
+      anchorTimer = null;
+      void flushAnchors();
+    }, 150);
+  };
+
+  const flushAnchors = async (): Promise<void> => {
+    const batch = Array.from(pendingAnchors.entries()).slice(0, 100);
+    if (batch.length === 0) return;
+    for (const [key] of batch) pendingAnchors.delete(key);
+    let fixes: AnchorFix[];
+    try {
+      fixes = await resolveAnchors(batch.map(([, anchor]) => anchor));
+    } catch {
+      // Leave them unasked rather than caching a transport failure as "fine".
+      return;
+    }
+    if (signal.aborted) return;
+    for (const [key] of batch) anchorFixes.set(key, null);
+    for (const fix of fixes) {
+      anchorFixes.set(anchorKey(fix.text, fix.href), fix);
+    }
+    if (fixes.length > 0) {
+      report(`anchor fixes ${fixes.length}/${batch.length}`);
+    }
+    queueSweep();
+  };
+
   let lastReport = "";
   const sweep = (): void => {
     sweepQueued = false;
@@ -118,7 +235,9 @@ export function mountChatPathButtons(
     // Links too, not just code spans: bb renders file mentions as anchors and
     // gives them its own "open" glyph, which is a different action from
     // revealing the file in the tree.
+    sweepAnchors();
     for (const code of Array.from(document.querySelectorAll("code, a"))) {
+      if (!isChatContent(code)) continue;
       // A `<code>` inside an `<a>` matches twice; let the inner one win so the
       // path gets one button, not two.
       if (code.querySelector("code, a") !== null) continue;
@@ -196,9 +315,17 @@ export function mountChatPathButtons(
    * click may call preventDefault(): doing it on pointerdown or mousedown
    * cancels the click that would otherwise follow.
    */
+  const fixedAnchorFrom = (target: EventTarget | null): HTMLElement | null => {
+    if (target === null || !(target instanceof Element)) return null;
+    return target.closest<HTMLElement>(`a[${FIXED_ATTR}]`);
+  };
+
   const onEarly = (event: Event): void => {
     const button = buttonFrom(event.target);
-    if (button === null) return;
+    if (button === null) {
+      onFixedAnchor(event);
+      return;
+    }
     event.stopImmediatePropagation();
     event.stopPropagation();
     if (event.type !== "click" && event.type !== "auxclick") return;
@@ -207,6 +334,37 @@ export function mountChatPathButtons(
     if (path === undefined || path === "") return;
     writeStoredOpen(true);
     requestReveal(path);
+  };
+
+  /**
+   * A link bb pointed at a file that is not there. bb would open a preview of
+   * that missing path, so the click is answered here instead — with the file
+   * the link text actually names.
+   */
+  const onFixedAnchor = (event: Event): void => {
+    const anchor = fixedAnchorFrom(event.target);
+    if (anchor === null) return;
+    const absolutePath = anchor.dataset.fileTreeFixedPath;
+    const hostId = anchor.dataset.fileTreeFixedHost;
+    if (absolutePath === undefined || hostId === undefined) return;
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    if (event.type !== "click" && event.type !== "auxclick") return;
+    event.preventDefault();
+    const isDirectory = anchor.dataset.fileTreeFixedDir === "1";
+    writeStoredOpen(true);
+    if (isDirectory) {
+      // A folder has no preview; showing it in the tree is the whole action.
+      requestReveal(textOf(anchor));
+      return;
+    }
+    openFixed({
+      text: textOf(anchor),
+      href: anchor.getAttribute("href") ?? "",
+      absolutePath,
+      hostId,
+      isDirectory,
+    });
   };
 
   const opts: AddEventListenerOptions = { capture: true, signal };
@@ -231,6 +389,11 @@ export function mountChatPathButtons(
         document.querySelectorAll(`button[${BUTTON_ATTR}]`),
       )) {
         button.remove();
+      }
+      for (const anchor of Array.from(
+        document.querySelectorAll<HTMLAnchorElement>(`a[${FIXED_ATTR}]`),
+      )) {
+        clearFix(anchor);
       }
     },
     { once: true },

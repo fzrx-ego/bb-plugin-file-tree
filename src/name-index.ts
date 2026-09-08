@@ -271,3 +271,138 @@ export async function findByName(
   if (relativePath === "" || relativePath.startsWith("..")) return null;
   return { relativePath, isDirectory: false, root };
 }
+
+/* ---------------------------------------------------------------------- *
+ * Typing a name instead of clicking one
+ * ---------------------------------------------------------------------- */
+
+/** A long result list is scrolling, not finding; the ranking decides the top. */
+const MAX_CANDIDATES = 2000;
+
+export interface IndexSearchHit {
+  name: string;
+  relativePath: string;
+  absolutePath: string;
+  root: RevealRoot;
+}
+
+interface Scored {
+  file: IndexedFile;
+  /** Lower is a better kind of match; ties break on depth, then length. */
+  tier: number;
+}
+
+/**
+ * What the user typed, reduced to what the index can be asked about.
+ *
+ * A pasted absolute path still works here: only its trailing segments are
+ * matched, so `/Users/me/Documents/x/y.md` finds the same file as `x/y.md`
+ * without the caller having to know which root it lives under.
+ */
+function normaliseQuery(raw: string): { needle: string; hasSlash: boolean } | null {
+  const trimmed = raw.trim().replace(/^["'`]|["'`]$/gu, "");
+  if (trimmed === "") return null;
+  const cleaned = trimmed
+    .replace(/\\/gu, "/")
+    .replace(/^~\//u, "")
+    .replace(/^\.\//u, "")
+    .replace(/\/+$/u, "")
+    .replace(/^\/+/u, "");
+  if (cleaned === "") return null;
+  return { needle: cleaned.toLowerCase(), hasSlash: cleaned.includes("/") };
+}
+
+/** The indexed path as `a/b/c`, which is how a typed query is spelled. */
+function joined(file: IndexedFile): string {
+  return file.segments.join("/");
+}
+
+function scoreByPath(file: IndexedFile, needle: string): number | null {
+  const path = joined(file);
+  if (path.endsWith(`/${needle}`) || path === needle) return 0;
+  return path.includes(needle) ? 1 : null;
+}
+
+function scoreByName(name: string, needle: string): number | null {
+  if (name === needle) return 0;
+  if (name.startsWith(needle)) return 1;
+  return name.includes(needle) ? 2 : null;
+}
+
+/**
+ * Same order as `pick`, one tier ahead of it: kind of match first, then the
+ * shallowest path, then the shortest, then alphabetical. Two runs of the same
+ * query give the same list.
+ */
+function compare(a: Scored, b: Scored): number {
+  if (a.tier !== b.tier) return a.tier - b.tier;
+  if (a.file.segments.length !== b.file.segments.length) {
+    return a.file.segments.length - b.file.segments.length;
+  }
+  if (a.file.absolutePath.length !== b.file.absolutePath.length) {
+    return a.file.absolutePath.length - b.file.absolutePath.length;
+  }
+  return a.file.absolutePath < b.file.absolutePath ? -1 : 1;
+}
+
+export async function searchByQuery(
+  roots: readonly RevealRoot[],
+  rawQuery: string,
+  limit: number,
+): Promise<IndexSearchHit[]> {
+  const query = normaliseQuery(rawQuery);
+  if (query === null || roots.length === 0) return [];
+  let index: FileIndex;
+  try {
+    index = await getIndex(roots);
+  } catch {
+    return [];
+  }
+
+  const scored: Scored[] = [];
+  // A query with a separator is about position, so it has to see every file;
+  // a bare word is about the name, and the index is already keyed by name.
+  if (query.hasSlash) {
+    outer: for (const files of index.byName.values()) {
+      for (const file of files) {
+        const tier = scoreByPath(file, query.needle);
+        if (tier === null) continue;
+        scored.push({ file, tier });
+        if (scored.length >= MAX_CANDIDATES) break outer;
+      }
+    }
+  } else {
+    outer: for (const [name, files] of index.byName) {
+      const tier = scoreByName(name, query.needle);
+      if (tier === null) continue;
+      for (const file of files) {
+        scored.push({ file, tier });
+        if (scored.length >= MAX_CANDIDATES) break outer;
+      }
+    }
+  }
+
+  scored.sort(compare);
+
+  const hits: IndexSearchHit[] = [];
+  const seen = new Set<string>();
+  for (const { file } of scored) {
+    if (hits.length >= limit) break;
+    if (seen.has(file.absolutePath)) continue;
+    seen.add(file.absolutePath);
+    const root = attribute(roots, file.absolutePath);
+    if (root === null) continue;
+    const relativePath = path
+      .relative(root.rootPath, file.absolutePath)
+      .split(path.sep)
+      .join("/");
+    if (relativePath === "" || relativePath.startsWith("..")) continue;
+    hits.push({
+      name: path.basename(file.absolutePath),
+      relativePath,
+      absolutePath: file.absolutePath,
+      root,
+    });
+  }
+  return hits;
+}

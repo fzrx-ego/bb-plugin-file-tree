@@ -66,7 +66,14 @@ function TreeRow({
       tree.toggleDir(entry.relativePath);
       return;
     }
-    const opened = openWorkspaceFile(navigate, workspace, entry.relativePath);
+    const opened = openWorkspaceFile(
+      navigate,
+      workspace,
+      entry.relativePath,
+      (message) => {
+        void rpc.call("clientLog", { message }).catch(() => undefined);
+      },
+    );
     if (!opened) {
       toast.error("Could not open the default preview for this file.");
     }
