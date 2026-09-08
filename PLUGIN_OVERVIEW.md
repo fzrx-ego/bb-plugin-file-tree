@@ -10,7 +10,7 @@ Not for people whose job is to upload, move, rename, or unzip under `$HOME`. Tha
 
 The tree sits on the right of the thread. Click a file to open BB's default preview. Right-click to add the relative path to the draft, copy a relative or absolute path, copy the file itself onto the clipboard, or reveal the item in Finder.
 
-When a message names a path, the tree can jump to it. If that path lives in another folder under your search roots, the tree re-roots there instead of reporting a miss.
+When a message names a path, the tree can jump to it. A bare file name works too: the search roots are indexed by name, so `AGENTS-base.md` lands on the file even when nothing in the message says which folder it is in. If the hit is in another folder, the tree re-roots there instead of reporting a miss.
 
 ## How it works
 
