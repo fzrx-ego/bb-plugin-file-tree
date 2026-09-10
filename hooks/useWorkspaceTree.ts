@@ -69,8 +69,7 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
       setDirs((prev) => ({ ...prev, [relativePath]: { status: "loading" } }));
       try {
         const { entries } = await rpc.call("listDir", {
-          hostId: ws.hostId,
-          rootPath: ws.rootPath,
+          rootId: ws.rootId,
           relativePath,
           showSkipped,
         });
@@ -147,6 +146,7 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
           hostId: root.hostId,
           rootPath: root.rootPath,
           rootName: root.rootName,
+          rootId: root.rootId,
         };
         setRerooted(landedIn);
         if (options?.quiet !== true) toast.message(`Showing ${root.rootName}`);

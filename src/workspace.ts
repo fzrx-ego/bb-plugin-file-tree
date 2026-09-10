@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { WorkspaceResult } from "../contract";
+import { registerRoot } from "./roots";
 
 function expandHome(input: string): string {
   if (input === "~") return homedir();
@@ -39,6 +40,7 @@ export async function workspaceForThread(
       hostId: environment.hostId,
       rootPath,
       rootName: path.basename(rootPath) || rootPath,
+      rootId: registerRoot(environment.hostId, rootPath),
     },
   };
 }
@@ -84,6 +86,7 @@ export async function workspaceForProject(
         hostId: hostSource.hostId,
         rootPath,
         rootName: path.basename(rootPath) || rootPath,
+        rootId: registerRoot(hostSource.hostId, rootPath),
       },
     };
   }
@@ -98,6 +101,7 @@ export async function workspaceForProject(
       hostId: source.hostId,
       rootPath: source.path,
       rootName: path.basename(source.path) || source.path,
+      rootId: registerRoot(source.hostId, source.path),
     },
   };
 }

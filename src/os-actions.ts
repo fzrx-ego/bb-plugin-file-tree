@@ -1,21 +1,28 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
 import { promisify } from "node:util";
-import { resolveUnderRoot } from "./paths";
+import { resolveRoot } from "./roots";
+import { resolveRealUnderRoot } from "./paths";
 
 const execFileAsync = promisify(execFile);
 
 export type OsActionResult = { ok: true } | { ok: false; message: string };
 
 export interface WorkspacePathInput {
-  rootPath: string;
+  rootId: string;
   relativePath: string;
 }
 
+/**
+ * These two actions always run on this process's own machine (there is no
+ * `hostId` to route by), so a root registered against a real workspace can be
+ * resolved and confined with a local, symlink-safe realpath check.
+ */
 async function resolveExisting(input: WorkspacePathInput): Promise<string> {
-  const absolute = resolveUnderRoot(input.rootPath, input.relativePath);
-  await access(absolute);
-  return absolute;
+  const root = resolveRoot(input.rootId);
+  if (root === undefined) {
+    throw new Error("This file tree panel is out of date — reopen it and try again.");
+  }
+  return resolveRealUnderRoot(root.rootPath, input.relativePath);
 }
 
 function fail(cause: unknown, fallback: string): OsActionResult {

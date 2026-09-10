@@ -5,7 +5,7 @@ A [BB](https://getbb.app) plugin that shows a compact file tree of the thread wo
 ## Install
 
 ```
-bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.13.1
+bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.14.0
 ```
 
 Or search **File Tree** in BB Community.
@@ -13,6 +13,7 @@ Or search **File Tree** in BB Community.
 ## Use
 
 - Type in the search box above the tree to find a file by name, by part of its path, or by a path you paste. Arrow keys move, Enter opens: the file is selected in the tree and opened in the preview, and the tree re-roots if the file lives in another project. Enter with nothing in the list falls back to resolving the text as written, which also covers folders.
+- Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
 - Click a file to open BB's default preview.
 - Right-click to add the path to chat, copy a relative or absolute path, copy the file itself, or reveal it in Finder.

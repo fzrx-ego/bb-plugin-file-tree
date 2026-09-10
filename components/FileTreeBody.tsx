@@ -90,7 +90,7 @@ function TreeRow({
   };
 
   const osPath = {
-    rootPath: workspace.rootPath,
+    rootId: workspace.rootId,
     relativePath: entry.relativePath,
   };
 

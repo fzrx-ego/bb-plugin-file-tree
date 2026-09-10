@@ -2,15 +2,18 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useComposerView } from "@get-bb/plugin-sdk/app";
 import { FileTreePanel } from "@/components/FileTreePanel";
+import { RailResizeHandle } from "@/components/RailResizeHandle";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
+import { useRailWidthPx } from "@/lib/rail-width";
 
 export function NewThreadFileTreeAction() {
   const { scope } = useComposerView();
   const projectId = scope.kind === "new-thread" ? scope.projectId : null;
   const portalScopeProps = usePortalScopeProps();
+  const railWidthPx = useRailWidthPx();
   const insetHolderId = useRef("file-tree:new-thread").current;
   const [open, setOpen] = useState(false);
 
@@ -39,9 +42,11 @@ export function NewThreadFileTreeAction() {
         ? createPortal(
             <aside
               {...portalScopeProps}
-              className="fixed bottom-0 right-0 top-0 z-40 flex w-[13.5rem] flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground"
+              className="fixed bottom-0 right-0 top-0 z-40 flex flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground"
+              style={{ width: `${railWidthPx}px` }}
               aria-label="Project file tree"
             >
+              <RailResizeHandle />
               <div className="flex h-[48px] shrink-0 items-center justify-between border-b border-sidebar-border pl-3 pr-1">
                 <span className="truncate text-sm font-medium text-muted-foreground">Files</span>
                 <Button
