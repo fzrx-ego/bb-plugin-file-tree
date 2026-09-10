@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { ChatPathBridge } from "@/components/ChatPathBridge";
 import { FileTreePanel } from "@/components/FileTreePanel";
+import { RailResizeHandle } from "@/components/RailResizeHandle";
 import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { RAIL_EVENT, readStoredOpen, writeStoredOpen } from "@/lib/rail-state";
+import { useRailWidthPx } from "@/lib/rail-width";
 
 /** Host renders plugin actions left of the workspace button; pane toggles live in a sibling. */
 function findPaneActionsHost(from: HTMLElement): HTMLElement | null {
@@ -34,6 +36,7 @@ export function FileTreeHeaderAction({
   isCompactViewport: boolean;
 }) {
   const { values, isLoading } = useSettings();
+  const railWidthPx = useRailWidthPx();
   const navigate = useBbNavigate();
   const portalScopeProps = usePortalScopeProps();
   const slotRef = useRef<HTMLSpanElement>(null);
@@ -128,9 +131,11 @@ export function FileTreeHeaderAction({
         ? createPortal(
             <aside
               {...portalScopeProps}
-              className="fixed bottom-0 right-0 top-0 z-40 flex w-[13.5rem] flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground"
+              className="fixed bottom-0 right-0 top-0 z-40 flex flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground"
+              style={{ width: `${railWidthPx}px` }}
               aria-label="Workspace file tree"
             >
+              <RailResizeHandle />
               <div className="flex h-[48px] shrink-0 items-center justify-between border-b border-sidebar-border pl-3 pr-1">
                 <span className="truncate text-sm font-medium text-muted-foreground">
                   Files

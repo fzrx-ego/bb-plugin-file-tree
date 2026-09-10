@@ -12,6 +12,7 @@ import type {
 } from "../contract";
 import { findByName, searchByQuery } from "./name-index";
 import { resolveUnderRoot, toRelativePath } from "./paths";
+import { registerRoot } from "./roots";
 import { workspaceForThread } from "./workspace";
 
 /**
@@ -232,6 +233,7 @@ export async function searchFiles(
     hostId: workspace.hostId,
     rootPath: workspace.rootPath,
     rootName: workspace.rootName,
+    rootId: workspace.rootId,
   };
   const roots = [
     here,
@@ -402,7 +404,7 @@ async function candidateRoots(
   const add = (rootPath: string, rootName: string, hostId: string): void => {
     if (rootPath === "" || seen.has(rootPath)) return;
     seen.add(rootPath);
-    roots.push({ hostId, rootPath, rootName });
+    roots.push({ hostId, rootPath, rootName, rootId: registerRoot(hostId, rootPath) });
   };
 
   try {

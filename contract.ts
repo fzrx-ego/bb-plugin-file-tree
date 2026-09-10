@@ -33,6 +33,13 @@ export const workspaceSchema = z.object({
   hostId: z.string(),
   rootPath: z.string(),
   rootName: z.string(),
+  /**
+   * Opaque id the server minted for {hostId, rootPath}. `listDir`,
+   * `revealInFinder` and `copyFileToClipboard` take this instead of the raw
+   * pair, so the server — not whatever called the RPC — decides which host
+   * and path an operation actually touches.
+   */
+  rootId: z.string(),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 
@@ -53,6 +60,7 @@ export const revealRootSchema = z.object({
   hostId: z.string(),
   rootPath: z.string(),
   rootName: z.string(),
+  rootId: z.string(),
 });
 export type RevealRoot = z.infer<typeof revealRootSchema>;
 
@@ -177,8 +185,7 @@ export const rpcContract = defineRpcContract({
   listDir: {
     input: z
       .object({
-        hostId: z.string().min(1),
-        rootPath: z.string().min(1),
+        rootId: z.string().min(1),
         relativePath: z.string(),
         showSkipped: z.boolean(),
       })
@@ -188,7 +195,7 @@ export const rpcContract = defineRpcContract({
   revealInFinder: {
     input: z
       .object({
-        rootPath: z.string().min(1),
+        rootId: z.string().min(1),
         relativePath: z.string(),
       })
       .strict(),
@@ -200,7 +207,7 @@ export const rpcContract = defineRpcContract({
   copyFileToClipboard: {
     input: z
       .object({
-        rootPath: z.string().min(1),
+        rootId: z.string().min(1),
         relativePath: z.string(),
       })
       .strict(),
