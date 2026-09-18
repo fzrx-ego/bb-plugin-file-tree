@@ -186,6 +186,37 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
     });
   }, []);
 
+  /**
+   * Expand every folder on the way to a newly created file, refresh that
+   * folder's listing, and select the file so it is visible in the tree.
+   */
+  const showCreated = useCallback(
+    async (relativePath: string) => {
+      const ws = activeRef.current;
+      if (ws === null) return;
+      const chain = ancestorChain(relativePath);
+      const folders = chain.slice(0, -1);
+      setExpanded((prev) => new Set([...prev, ...folders]));
+      const parent = folders[folders.length - 1] ?? "";
+      await loadDir(ws, parent);
+      setSelected(relativePath);
+    },
+    [loadDir],
+  );
+
+  /** Reload the parent folder after a file is deleted, and drop the selection. */
+  const forgetPath = useCallback(
+    async (relativePath: string) => {
+      const ws = activeRef.current;
+      if (ws === null) return;
+      const slash = relativePath.lastIndexOf("/");
+      const parent = slash === -1 ? "" : relativePath.slice(0, slash);
+      await loadDir(ws, parent);
+      setSelected((current) => (current === relativePath ? null : current));
+    },
+    [loadDir],
+  );
+
   return {
     settingsLoading,
     workspace,
@@ -198,6 +229,8 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
     setSelected,
     reveal,
     toggleDir,
+    showCreated,
+    forgetPath,
     reload: loadWorkspace,
   };
 }
