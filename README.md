@@ -5,7 +5,7 @@ A [BB](https://getbb.app) plugin that shows a compact file tree of the thread wo
 ## Install
 
 ```
-bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.14.0
+bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.16.0
 ```
 
 Or search **File Tree** in BB Community.
@@ -16,7 +16,7 @@ Or search **File Tree** in BB Community.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
 - Click a file to open BB's default preview.
-- Right-click to add the path to chat, copy a relative or absolute path, copy the file itself, or reveal it in Finder.
+- Right-click to add the path to chat, create a blank `.md` in that folder, delete a file, copy a relative or absolute path, copy the file itself, or reveal it in Finder. Right-click the root name at the top of the tree to create the file there. A new markdown file is named `untitled.md` (or `untitled-2.md`, …) and opens in the external editor so you can paste into it. Delete asks for confirmation and only applies to files, not folders.
 - Paths written in chat can jump the tree to that file, and so do bare file names like `AGENTS-base.md`. Search roots (default `~/Documents`) cover folders outside the current checkout.
 
 Copy File uses the macOS or Windows file clipboard. Open in Finder uses macOS `open -R`.

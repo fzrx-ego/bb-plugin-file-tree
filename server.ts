@@ -1,5 +1,7 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { rpcContract } from "./contract";
+import { createBlankMarkdown } from "./src/blank-markdown";
+import { deleteFile } from "./src/delete-file";
 import { listDir } from "./src/listing";
 import { copyFileToClipboard, revealInFinder } from "./src/os-actions";
 import {
@@ -96,6 +98,8 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     listDir: (input) => listDir(bb, input),
     revealInFinder: (input) => revealInFinder(input),
     copyFileToClipboard: (input) => copyFileToClipboard(input),
+    createBlankMarkdown: (input) => createBlankMarkdown(bb, input),
+    deleteFile: (input) => deleteFile(bb, input),
   });
 
   bb.onDispose(() => {

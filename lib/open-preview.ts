@@ -19,24 +19,33 @@ export function openWorkspaceFile(
   workspace: Workspace,
   relativePath: string,
   report: (message: string) => void = () => undefined,
+  via: "preview" | "external" = "preview",
 ): boolean {
   const root = workspace.rootPath.replace(/\/+$/u, "");
   const absolutePath = relativePath === "" ? root : `${root}/${relativePath}`;
   const environmentId = workspace.environmentId;
   try {
     if (environmentId !== null && environmentId !== "") {
-      const opened = navigate.experimental_openFilePreview({
-        target: { kind: "workspace", environmentId, path: relativePath },
+      const workspaceTarget = {
+        target: { kind: "workspace" as const, environmentId, path: relativePath },
         location: null,
-      });
-      report(`open workspace ${environmentId} ${relativePath} -> ${opened}`);
+      };
+      const opened =
+        via === "external"
+          ? navigate.experimental_openFileExternally(workspaceTarget)
+          : navigate.experimental_openFilePreview(workspaceTarget);
+      report(`open ${via} workspace ${environmentId} ${relativePath} -> ${opened}`);
       if (opened) return true;
     }
-    const opened = navigate.experimental_openFilePreview({
-      target: { kind: "host", hostId: workspace.hostId, path: absolutePath },
+    const hostTarget = {
+      target: { kind: "host" as const, hostId: workspace.hostId, path: absolutePath },
       location: null,
-    });
-    report(`open host ${workspace.hostId} ${absolutePath} -> ${opened}`);
+    };
+    const opened =
+      via === "external"
+        ? navigate.experimental_openFileExternally(hostTarget)
+        : navigate.experimental_openFilePreview(hostTarget);
+    report(`open ${via} host ${workspace.hostId} ${absolutePath} -> ${opened}`);
     return opened;
   } catch (cause) {
     report(`open threw: ${cause instanceof Error ? cause.message : String(cause)}`);

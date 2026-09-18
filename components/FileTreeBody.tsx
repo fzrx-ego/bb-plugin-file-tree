@@ -22,6 +22,47 @@ function absolutePathOf(workspace: Workspace, relativePath: string): string {
   return relativePath === "" ? root : `${root}/${relativePath}`;
 }
 
+/** Folder a new file should land in: the row itself if it is a folder, else its parent. */
+function directoryOf(entry: TreeEntry): string {
+  if (entry.kind === "directory") return entry.relativePath;
+  const slash = entry.relativePath.lastIndexOf("/");
+  return slash === -1 ? "" : entry.relativePath.slice(0, slash);
+}
+
+async function createAndOpenBlankMd(args: {
+  rpc: ReturnType<typeof useRpc<typeof rpcContract>>;
+  navigate: ReturnType<typeof useBbNavigate>;
+  workspace: Workspace;
+  directoryRelativePath: string;
+  showCreated: (relativePath: string) => Promise<void>;
+}): Promise<void> {
+  try {
+    const result = await args.rpc.call("createBlankMarkdown", {
+      rootId: args.workspace.rootId,
+      directoryRelativePath: args.directoryRelativePath,
+    });
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+    await args.showCreated(result.relativePath);
+    const opened = openWorkspaceFile(
+      args.navigate,
+      args.workspace,
+      result.relativePath,
+      (message) => {
+        void args.rpc.call("clientLog", { message }).catch(() => undefined);
+      },
+      "external",
+    );
+    if (!opened) {
+      toast.error("Created the file, but could not open it in an external editor.");
+    }
+  } catch {
+    toast.error("Could not create a blank markdown file.");
+  }
+}
+
 function reasonText(reason: "no_thread" | "no_environment" | "no_checkout"): string {
   switch (reason) {
     case "no_thread":
@@ -117,6 +158,35 @@ function TreeRow({
       });
   };
 
+  const createBlankMd = () => {
+    void createAndOpenBlankMd({
+      rpc,
+      navigate,
+      workspace,
+      directoryRelativePath: directoryOf(entry),
+      showCreated: tree.showCreated,
+    });
+  };
+
+  const deleteThisFile = () => {
+    if (!window.confirm(`Delete ${entry.name}?`)) return;
+    void rpc
+      .call("deleteFile", {
+        rootId: workspace.rootId,
+        relativePath: entry.relativePath,
+      })
+      .then(async (result) => {
+        if (!result.ok) {
+          toast.error(result.message);
+          return;
+        }
+        await tree.forgetPath(result.relativePath);
+      })
+      .catch(() => {
+        toast.error("Could not delete the file.");
+      });
+  };
+
   return (
     <div>
       <ContextMenu>
@@ -153,6 +223,19 @@ function TreeRow({
             <Icon name="MessageSquarePlus" className="size-4" />
             Add to chat
           </ContextMenuItem>
+          <ContextMenuItem onSelect={createBlankMd}>
+            <Icon name="FileText" className="size-4" />
+            Create blank .md
+          </ContextMenuItem>
+          {!isDir ? (
+            <ContextMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={deleteThisFile}
+            >
+              <Icon name="Trash2" className="size-4" />
+              Delete file
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={openInFinder}>
             <Icon name="FolderOpen" className="size-4" />
@@ -216,6 +299,9 @@ function TreeRow({
 }
 
 export function FileTreeBody({ tree }: { tree: TreeModel }) {
+  const navigate = useBbNavigate();
+  const rpc = useRpc<typeof rpcContract>();
+
   if (tree.settingsLoading || tree.workspace === null) {
     return (
       <p className="px-2 py-3 text-[11px] text-muted-foreground">Loading…</p>
@@ -229,25 +315,46 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
       </p>
     );
   }
+
+  const createBlankMdInRoot = () => {
+    void createAndOpenBlankMd({
+      rpc,
+      navigate,
+      workspace,
+      directoryRelativePath: "",
+      showCreated: tree.showCreated,
+    });
+  };
+
   const root = tree.dirs[""];
   return (
     <div className="min-h-0 flex-1 overflow-auto py-1">
-      <button
-        type="button"
-        className="flex w-full items-center gap-1 px-1.5 py-0.5 text-left text-[11px] font-medium text-muted-foreground"
-        onClick={() => void tree.reload()}
-        title={
-          tree.isRerooted
-            ? `${workspace.rootPath} — click to go back to this thread's workspace`
-            : workspace.rootPath
-        }
-      >
-        <Icon
-          name={tree.isRerooted ? "ArrowTurnBackward" : "FolderGit"}
-          className="size-3 shrink-0"
-        />
-        <span className="min-w-0 truncate">{workspace.rootName}</span>
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 px-1.5 py-0.5 text-left text-[11px] font-medium text-muted-foreground"
+            onClick={() => void tree.reload()}
+            title={
+              tree.isRerooted
+                ? `${workspace.rootPath} — click to go back to this thread's workspace`
+                : workspace.rootPath
+            }
+          >
+            <Icon
+              name={tree.isRerooted ? "ArrowTurnBackward" : "FolderGit"}
+              className="size-3 shrink-0"
+            />
+            <span className="min-w-0 truncate">{workspace.rootName}</span>
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-56">
+          <ContextMenuItem onSelect={createBlankMdInRoot}>
+            <Icon name="FileText" className="size-4" />
+            Create blank .md
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {root?.status === "error" ? (
         <p className="px-2 text-[11px] text-destructive">{root.message}</p>
       ) : null}

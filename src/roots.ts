@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 /**
  * Server-side registry mapping an opaque id to a {hostId, rootPath} pair the
  * plugin itself resolved (a thread's workspace, a configured search root, a
- * registered project). `listDir`, `revealInFinder` and `copyFileToClipboard`
- * take only this id from the client and look the pair up here, rather than
+ * registered project). `listDir`, `revealInFinder`, `copyFileToClipboard`
+ * and `createBlankMarkdown` / `deleteFile` take only this id from the client and look the
+ * pair up here, rather than
  * trusting a client-supplied hostId/rootPath — a caller that reaches the RPC
  * directly, bypassing the tree UI, can otherwise point those calls at any
  * path on any paired host.

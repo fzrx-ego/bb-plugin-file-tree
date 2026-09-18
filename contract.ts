@@ -216,4 +216,33 @@ export const rpcContract = defineRpcContract({
       z.object({ ok: z.literal(false), message: z.string() }),
     ]),
   },
+  /**
+   * Create an empty `untitled.md` (or untitled-2.md, …) in the given folder
+   * and return its workspace-relative path so the tree can select and open it.
+   */
+  createBlankMarkdown: {
+    input: z
+      .object({
+        rootId: z.string().min(1),
+        directoryRelativePath: z.string(),
+      })
+      .strict(),
+    output: z.discriminatedUnion("ok", [
+      z.object({ ok: z.literal(true), relativePath: z.string() }),
+      z.object({ ok: z.literal(false), message: z.string() }),
+    ]),
+  },
+  /** Delete one file. Directories and the tree root are refused. */
+  deleteFile: {
+    input: z
+      .object({
+        rootId: z.string().min(1),
+        relativePath: z.string(),
+      })
+      .strict(),
+    output: z.discriminatedUnion("ok", [
+      z.object({ ok: z.literal(true), relativePath: z.string() }),
+      z.object({ ok: z.literal(false), message: z.string() }),
+    ]),
+  },
 });
