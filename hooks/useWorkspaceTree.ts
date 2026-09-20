@@ -15,6 +15,16 @@ function ancestorChain(relativePath: string): string[] {
   return chain;
 }
 
+/**
+ * BB attaches the environment to a freshly provisioned thread after the panel
+ * has already mounted, so the first lookup answers `no_environment` and the
+ * panel would keep that answer for the life of the mount — there is no root row
+ * to click for a reload while it is showing. Poll until the environment lands.
+ * Every other failure is a real one and is left alone.
+ */
+const PROVISION_RETRY_MS = 1500;
+const PROVISION_RETRY_LIMIT = 40;
+
 /** Where a reveal landed, so the caller can open the file it just selected. */
 export interface Revealed {
   workspace: Workspace;
@@ -40,27 +50,28 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
   dirsRef.current = dirs;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set([""]));
   const [selected, setSelected] = useState<string | null>(null);
+  const [provisionRetries, setProvisionRetries] = useState(0);
 
-  const loadWorkspace = useCallback(async () => {
+  // Returns what it stored as well, so a caller that needs the root right now
+  // does not have to wait for the next render to read it back out of state.
+  const loadWorkspace = useCallback(async (): Promise<WorkspaceResult> => {
     setRerooted(null);
+    const store = (result: WorkspaceResult): WorkspaceResult => {
+      setWorkspace(result);
+      return result;
+    };
     if (threadId === null) {
-      if (projectId === null) {
-        setWorkspace({ ok: false, reason: "no_thread" });
-        return;
-      }
+      if (projectId === null) return store({ ok: false, reason: "no_thread" });
       try {
-        const result = await rpc.call("workspaceForProject", { projectId });
-        setWorkspace(result);
+        return store(await rpc.call("workspaceForProject", { projectId }));
       } catch {
-        setWorkspace({ ok: false, reason: "no_checkout" });
+        return store({ ok: false, reason: "no_checkout" });
       }
-      return;
     }
     try {
-      const result = await rpc.call("workspaceForThread", { threadId });
-      setWorkspace(result);
+      return store(await rpc.call("workspaceForThread", { threadId }));
     } catch {
-      setWorkspace({ ok: false, reason: "no_checkout" });
+      return store({ ok: false, reason: "no_checkout" });
     }
   }, [projectId, rpc, threadId]);
 
@@ -94,6 +105,11 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
     void loadWorkspace();
   }, [loadWorkspace]);
 
+  // A new thread starts the retry budget over; the previous one's is spent.
+  useEffect(() => {
+    setProvisionRetries(0);
+  }, [projectId, threadId]);
+
   /** The root actually on screen: a reveal may have moved it to another project. */
   const active: Workspace | null =
     rerooted ?? (workspace?.ok === true ? workspace.workspace : null);
@@ -101,6 +117,19 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
   // through a ref rather than closing over a stale one.
   const activeRef = useRef(active);
   activeRef.current = active;
+
+  useEffect(() => {
+    if (workspace === null || workspace.ok) return;
+    if (workspace.reason !== "no_environment") return;
+    // A reveal put another project on screen; re-asking would take it away.
+    if (rerooted !== null) return;
+    if (provisionRetries >= PROVISION_RETRY_LIMIT) return;
+    const timer = window.setTimeout(() => {
+      setProvisionRetries((count) => count + 1);
+      void loadWorkspace();
+    }, PROVISION_RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [loadWorkspace, provisionRetries, rerooted, workspace]);
 
   const rootKey = active?.rootPath ?? "";
   useEffect(() => {
@@ -152,6 +181,14 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
         if (options?.quiet !== true) toast.message(`Showing ${root.rootName}`);
       } else {
         setRerooted(null);
+        // The server just resolved the path inside this thread's own workspace,
+        // so a cached "no workspace" from a mount that raced provisioning is
+        // stale. Without this the expansion below lands in a tree that is never
+        // rendered and the click looks dead.
+        if (landedIn === null) {
+          const refreshed = await loadWorkspace();
+          if (refreshed.ok) landedIn = refreshed.workspace;
+        }
       }
       const chain = ancestorChain(resolved.relativePath);
       const toExpand = resolved.isDirectory ? chain : chain.slice(0, -1);
@@ -168,7 +205,7 @@ export function useWorkspaceTree(threadId: string | null, projectId: string | nu
         isDirectory: resolved.isDirectory,
       };
     },
-    [rpc, threadId],
+    [loadWorkspace, rpc, threadId],
   );
 
   useEffect(() => {

@@ -309,10 +309,22 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
   }
   const workspace = tree.active;
   if (workspace === null) {
+    if (tree.workspace.ok) {
+      return (
+        <p className="px-2 py-3 text-[11px] text-muted-foreground">Loading…</p>
+      );
+    }
+    // The root row carries the reload action, and it is not on screen here, so
+    // the message itself has to offer the retry.
     return (
-      <p className="px-2 py-3 text-[11px] text-muted-foreground">
-        {tree.workspace.ok ? "Loading…" : reasonText(tree.workspace.reason)}
-      </p>
+      <button
+        type="button"
+        className="px-2 py-3 text-left text-[11px] text-muted-foreground"
+        onClick={() => void tree.reload()}
+        title="Click to look again"
+      >
+        {reasonText(tree.workspace.reason)}
+      </button>
     );
   }
 
