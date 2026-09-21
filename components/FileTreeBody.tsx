@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useBbNavigate, useComposer, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Icon } from "@/components/ui/icon";
 import {
   ContextMenu,
@@ -211,10 +212,9 @@ function TreeRow({
                 />
               ) : null}
             </span>
-            <Icon
-              name={isDir ? "Folder" : "File"}
-              className="size-3 shrink-0 text-muted-foreground"
-            />
+            {isDir ? null : (
+              <FileTypeIcon name={entry.name} className="size-3" />
+            )}
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
           </button>
         </ContextMenuTrigger>
