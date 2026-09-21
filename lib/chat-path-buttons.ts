@@ -17,6 +17,7 @@
  */
 import { requestReveal } from "./reveal-bus";
 import { writeStoredOpen } from "./rail-state";
+import { createTimedCache, PATH_CACHE_TTL_MS } from "./timed-cache";
 import type { AnchorFix } from "../contract";
 
 const BUTTON_ATTR = "data-file-tree-reveal";
@@ -137,15 +138,45 @@ function anchorKey(text: string, href: string): string {
   return `${text}\n${href}`;
 }
 
+/**
+ * Shared across mounts of the same thread. A header re-render aborts the
+ * effect and would otherwise send every path in the chat to the server again.
+ * Each entry expires on its own, so a file created later is asked again
+ * without keeping a miss from the start of the session.
+ */
+const verdictCache = createTimedCache<boolean>(PATH_CACHE_TTL_MS);
+const anchorCache = createTimedCache<AnchorFix | null>(PATH_CACHE_TTL_MS);
+/** One resolve at a time per thread, so a remount waits for the request it aborted. */
+const pathChain = new Map<string, Promise<void>>();
+const anchorChain = new Map<string, Promise<void>>();
+
+function after(chain: Map<string, Promise<void>>, scope: string, job: () => Promise<void>): Promise<void> {
+  const prev = chain.get(scope) ?? Promise.resolve();
+  const next = prev.then(job, job).then(
+    () => undefined,
+    () => undefined,
+  );
+  chain.set(scope, next);
+  return next;
+}
+
+/** Drop local entries whose shared stamp has expired, so a miss does not last the whole mount. */
+function expireLocal<T>(local: Map<string, T>, fresh: Map<string, T>): void {
+  for (const key of local.keys()) {
+    if (!fresh.has(key)) local.delete(key);
+  }
+}
+
 export function mountChatPathButtons(
   signal: AbortSignal,
+  threadId: string,
   validate: PathValidator,
   resolveAnchors: AnchorResolver,
   openFixed: FixedOpener,
   report: Reporter = () => undefined,
 ): void {
   /** path → exists in the workspace. Absent means "not asked yet". */
-  const known = new Map<string, boolean>();
+  const known = verdictCache.recall(threadId);
   const pending = new Set<string>();
   let flushTimer: number | null = null;
   let sweepQueued = false;
@@ -163,7 +194,7 @@ export function mountChatPathButtons(
    * key → the file bb's link should have pointed at, or null when bb's own
    * link is fine (or nothing better exists) and the click stays bb's.
    */
-  const anchorFixes = new Map<string, AnchorFix | null>();
+  const anchorFixes = anchorCache.recall(threadId);
   const pendingAnchors = new Map<string, { text: string; href: string }>();
   let anchorTimer: number | null = null;
 
@@ -184,6 +215,7 @@ export function mountChatPathButtons(
   };
 
   const sweepAnchors = (): void => {
+    expireLocal(anchorFixes, anchorCache.recall(threadId));
     for (const anchor of chatQuery<HTMLAnchorElement>('a[href^="file:"]')) {
       const href = anchorTargetPath(anchor);
       const text = textOf(anchor);
@@ -211,26 +243,32 @@ export function mountChatPathButtons(
     }, 400);
   };
 
-  const flushAnchors = async (): Promise<void> => {
+  const flushAnchors = (): void => {
     const batch = Array.from(pendingAnchors.entries()).slice(0, 100);
     if (batch.length === 0) return;
     for (const [key] of batch) pendingAnchors.delete(key);
-    let fixes: AnchorFix[];
-    try {
-      fixes = await resolveAnchors(batch.map(([, anchor]) => anchor));
-    } catch {
-      // Leave them unasked rather than caching a transport failure as "fine".
-      return;
-    }
-    if (signal.aborted) return;
-    for (const [key] of batch) anchorFixes.set(key, null);
-    for (const fix of fixes) {
-      anchorFixes.set(anchorKey(fix.text, fix.href), fix);
-    }
-    if (fixes.length > 0) {
-      report(`anchor fixes ${fixes.length}/${batch.length}`);
-    }
-    queueSweep();
+    void after(anchorChain, threadId, async () => {
+      const fresh = anchorCache.recall(threadId);
+      for (const [key, fix] of fresh) anchorFixes.set(key, fix);
+      const still = batch.filter(([key]) => !anchorFixes.has(key));
+      if (still.length === 0) return;
+      let fixes: AnchorFix[];
+      try {
+        fixes = await resolveAnchors(still.map(([, anchor]) => anchor));
+      } catch {
+        // Leave them unasked rather than caching a transport failure as "fine".
+        return;
+      }
+      for (const [key] of still) anchorCache.remember(threadId, key, null);
+      for (const fix of fixes) anchorCache.remember(threadId, anchorKey(fix.text, fix.href), fix);
+      if (signal.aborted) return;
+      for (const [key] of still) anchorFixes.set(key, null);
+      for (const fix of fixes) anchorFixes.set(anchorKey(fix.text, fix.href), fix);
+      if (fixes.length > 0) {
+        report(`anchor fixes ${fixes.length}/${batch.length}`);
+      }
+      queueSweep();
+    });
   };
 
   let lastReport = "";
@@ -244,6 +282,7 @@ export function mountChatPathButtons(
       sweepAgain = false;
       return;
     }
+    expireLocal(known, verdictCache.recall(threadId));
     let codes = 0;
     let candidates = 0;
     let wanted = 0;
@@ -309,25 +348,32 @@ export function mountChatPathButtons(
     }, 400);
   };
 
-  const flush = async (): Promise<void> => {
+  const flush = (): void => {
     const batch = Array.from(pending).slice(0, 200);
     if (batch.length === 0) return;
     for (const path of batch) pending.delete(path);
-    let resolved: Set<string>;
-    try {
-      resolved = await validate(batch);
-    } catch {
-      // Leave them unknown rather than caching a transport failure as "no".
-      return;
-    }
-    if (signal.aborted) return;
-    for (const path of batch) known.set(path, resolved.has(path));
-    report(
-      `validated ${batch.length}, known ${resolved.size}: ${Array.from(resolved)
-        .slice(0, 5)
-        .join(" | ")}`,
-    );
-    queueSweep();
+    void after(pathChain, threadId, async () => {
+      const fresh = verdictCache.recall(threadId);
+      for (const [path, exists] of fresh) known.set(path, exists);
+      const still = batch.filter((path) => !known.has(path));
+      if (still.length === 0) return;
+      let resolved: Set<string>;
+      try {
+        resolved = await validate(still);
+      } catch {
+        // Leave them unasked rather than caching a transport failure as "no".
+        return;
+      }
+      for (const path of still) verdictCache.remember(threadId, path, resolved.has(path));
+      if (signal.aborted) return;
+      for (const path of still) known.set(path, resolved.has(path));
+      report(
+        `validated ${still.length}, known ${resolved.size}: ${Array.from(resolved)
+          .slice(0, 5)
+          .join(" | ")}`,
+      );
+      queueSweep();
+    });
   };
 
   const buttonFrom = (target: EventTarget | null): HTMLElement | null => {

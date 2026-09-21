@@ -11,8 +11,10 @@ import type { rpcContract } from "../contract";
  * guess about the desktop app's routing, and when it did not match the
  * scanner never started at all.
  *
- * Remounting per thread also drops the cache of resolved paths — another
- * thread can mean another workspace, where the same string may not exist.
+ * A new `rpc` or `navigate` identity remounts this effect. The scanner keeps
+ * its verdicts in a module cache keyed by `threadId`, so that remount does
+ * not ask the server about paths it already resolved. Another thread has its
+ * own key: the same string may exist in one workspace and not in another.
  */
 export function ChatPathBridge({ threadId }: { threadId: string }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -22,6 +24,7 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
     const controller = new AbortController();
     mountChatPathButtons(
       controller.signal,
+      threadId,
       async (paths) => {
         const { known } = await rpc.call("resolvePaths", { threadId, paths });
         return new Set(known);
