@@ -5,7 +5,7 @@ A [BB](https://getbb.app) plugin that shows a compact file tree of the thread wo
 ## Install
 
 ```
-bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.16.0
+bb plugin install git:https://github.com/fzrx-ego/bb-plugin-file-tree.git@semver:^0.17.0
 ```
 
 Or search **File Tree** in BB Community.
@@ -15,6 +15,7 @@ Or search **File Tree** in BB Community.
 - Type in the search box above the tree to find a file by name, by part of its path, or by a path you paste. Arrow keys move, Enter opens: the file is selected in the tree and opened in the preview, and the tree re-roots if the file lives in another project. Enter with nothing in the list falls back to resolving the text as written, which also covers folders.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
+- Files show Seti-style type icons (markdown, JSON, git, `.env`, README, TypeScript, …), as in Cursor. Folders keep only the chevron.
 - Click a file to open BB's default preview.
 - Right-click to add the path to chat, create a blank `.md` in that folder, delete a file, copy a relative or absolute path, copy the file itself, or reveal it in Finder. Right-click the root name at the top of the tree to create the file there. A new markdown file is named `untitled.md` (or `untitled-2.md`, …) and opens in the external editor so you can paste into it. Delete asks for confirmation and only applies to files, not folders.
 - Paths written in chat can jump the tree to that file, and so do bare file names like `AGENTS-base.md`. Search roots (default `~/Documents`) cover folders outside the current checkout.

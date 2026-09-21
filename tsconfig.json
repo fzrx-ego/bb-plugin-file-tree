@@ -30,6 +30,6 @@
     "hooks"
   ],
   "exclude": [
-    "src/**/*.test.ts"
+    "**/*.test.ts"
   ]
 }

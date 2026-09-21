@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { SearchHit } from "../contract";
@@ -76,7 +77,7 @@ function ResultRow({
         isActive && "bg-state-active",
       )}
     >
-      <Icon name="File" className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+      <FileTypeIcon name={hit.name} className="mt-0.5 size-3" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11px] leading-4">{hit.name}</span>
         <span className="block truncate text-[10px] leading-4 text-muted-foreground">
