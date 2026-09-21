@@ -28,10 +28,11 @@ import type { RevealRoot } from "../contract";
 import { mapLimit } from "./pool";
 
 /**
- * Fresh enough that a chat burst reuses one index, short enough that a file
- * created in Finder shows up in the next search without a full reread.
+ * A chat burst and a header re-render reuse one index. A file created in
+ * Finder shows up in a name search within ten minutes. An exact path still
+ * stats immediately and does not wait on this timer.
  */
-const INDEX_TTL_MS = 90_000;
+const INDEX_TTL_MS = 10 * 60 * 1000;
 /** Deep enough for `Documents/<project>/<area>/<...>`, not for a whole disk. */
 const MAX_DEPTH = 10;
 /** A ceiling, not a target: ~50k entries is a normal Documents folder. */
