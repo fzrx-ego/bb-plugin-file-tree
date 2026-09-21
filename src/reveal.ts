@@ -11,6 +11,7 @@ import type {
   Workspace,
 } from "../contract";
 import { findByName, searchByQuery } from "./name-index";
+import { mapLimit } from "./pool";
 import { resolveUnderRoot, toRelativePath } from "./paths";
 import { registerRoot } from "./roots";
 import { workspaceForThread } from "./workspace";
@@ -269,7 +270,9 @@ export async function resolvePaths(
 
   // Whatever the icon promises, the click must deliver — so this asks exactly
   // the same question the click will, including the other projects.
-  const checks = input.paths.map(async (raw) => {
+  // A message can name dozens of paths; running every lookup at once is a
+  // stat storm. A few at a time still answers the whole batch.
+  const settled = await mapLimit(input.paths, 4, async (raw) => {
     const here = await resolveOne(bb, result.workspace, raw);
     if (here !== null) return raw;
     const elsewhere = await findOutsideWorkspace(
@@ -281,7 +284,6 @@ export async function resolvePaths(
     );
     return elsewhere === null ? null : raw;
   });
-  const settled = await Promise.all(checks);
   return { known: settled.filter((value): value is string => value !== null) };
 }
 
@@ -328,7 +330,7 @@ export async function resolveFileAnchors(
   if (!result.ok) return { fixes: [] };
   const workspace = result.workspace;
 
-  const checks = input.anchors.map(async (anchor): Promise<AnchorFix | null> => {
+  const checks = await mapLimit(input.anchors, 4, async (anchor): Promise<AnchorFix | null> => {
     if (await pathExists(anchor.href)) return null;
 
     const here = await resolveOne(bb, workspace, anchor.text);
@@ -365,7 +367,7 @@ export async function resolveFileAnchors(
       isDirectory: elsewhere.isDirectory,
     };
   });
-  const settled = await Promise.all(checks);
+  const settled = checks;
   return {
     fixes: settled.filter((fix): fix is AnchorFix => fix !== null),
   };

@@ -13,31 +13,54 @@
  * briefly, keyed by file name. It answers the only question a bare name can
  * ask — "where is a file called this?" — and it answers it the same way for
  * the icon and for the click.
+ *
+ * The walk is the expensive part (a Documents tree is tens of thousands of
+ * directories). It runs with a small concurrency cap, and a later lookup
+ * reuses a directory whose mtime has not changed instead of reading it again.
+ * Adding or renaming a file still shows up, because that updates the parent
+ * directory's mtime.
  */
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { SKIP_DIR_NAMES } from "../contract";
 import type { RevealRoot } from "../contract";
+import { mapLimit } from "./pool";
 
-/** A live tree changes under the index, but a chat sweep is a burst. */
-const INDEX_TTL_MS = 60_000;
+/**
+ * Fresh enough that a chat burst reuses one index, short enough that a file
+ * created in Finder shows up in the next search without a full reread.
+ */
+const INDEX_TTL_MS = 90_000;
 /** Deep enough for `Documents/<project>/<area>/<...>`, not for a whole disk. */
 const MAX_DEPTH = 10;
 /** A ceiling, not a target: ~50k entries is a normal Documents folder. */
 const MAX_FILES = 200_000;
 /** A name shared by dozens of files is prose or a build artefact, not a hit. */
 const MAX_PER_NAME = 32;
+/** Parallel readdirs of a whole frontier stall the disk; a handful do not. */
+const WALK_CONCURRENCY = 8;
 
 interface IndexedFile {
   /** Absolute, so a hit can be re-attributed to the most specific root. */
   absolutePath: string;
-  /** Lower-cased path segments, for suffix matching without re-splitting. */
-  segments: string[];
+  /** Lower-cased `/`-separated path, no leading slash. */
+  lowerPath: string;
+  /** Segment count, so ranking can prefer the shallower path. */
+  depth: number;
+}
+
+/** What a directory contained last time we read it. Names, not absolute paths. */
+interface DirSnap {
+  mtimeMs: number;
+  fileNames: string[];
+  childNames: string[];
 }
 
 interface FileIndex {
   at: number;
   byName: Map<string, IndexedFile[]>;
+  snaps: Map<string, DirSnap>;
 }
 
 export interface NameHit {
@@ -75,70 +98,152 @@ function isInside(parent: string, child: string): boolean {
   return target.startsWith(prefix);
 }
 
-async function buildIndex(roots: readonly RevealRoot[]): Promise<FileIndex> {
+function describe(absolutePath: string): Pick<IndexedFile, "lowerPath" | "depth"> {
+  const segments = absolutePath
+    .split(path.sep)
+    .filter((segment) => segment !== "");
+  return { lowerPath: segments.join("/").toLowerCase(), depth: segments.length };
+}
+
+function addFile(byName: Map<string, IndexedFile[]>, absolutePath: string): void {
+  const name = path.basename(absolutePath).toLowerCase();
+  const existing = byName.get(name);
+  const file: IndexedFile = { absolutePath, ...describe(absolutePath) };
+  if (existing === undefined) {
+    byName.set(name, [file]);
+    return;
+  }
+  if (existing.length >= MAX_PER_NAME) return;
+  existing.push(file);
+}
+
+interface WalkNode {
+  dir: string;
+  depth: number;
+}
+
+type DirRead =
+  | { node: WalkNode; kind: "missing" }
+  | { node: WalkNode; kind: "reuse"; snap: DirSnap }
+  | { node: WalkNode; kind: "fresh"; mtimeMs: number; entries: Dirent[] };
+
+async function readDir(node: WalkNode, prev: DirSnap | undefined): Promise<DirRead> {
+  // Stat first and store that mtime with the names we then read. A file that
+  // appears during the read makes the directory newer than the stored mtime,
+  // so the next refresh reads it again. Statting afterwards can store the new
+  // mtime together with the old names and hide that file until something else
+  // changes the directory.
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(node.dir)).mtimeMs;
+  } catch {
+    return { node, kind: "missing" };
+  }
+  if (prev !== undefined && prev.mtimeMs === mtimeMs) {
+    return { node, kind: "reuse", snap: prev };
+  }
+  try {
+    const entries = await readdir(node.dir, { withFileTypes: true });
+    return { node, kind: "fresh", mtimeMs, entries };
+  } catch {
+    return { node, kind: "missing" };
+  }
+}
+
+/**
+ * Breadth-first, so when the file budget runs out what is missing is the
+ * deepest corner of the tree rather than whole roots listed later.
+ *
+ * A directory whose mtime matches the previous snap contributes its old names
+ * and is not read again. A new or renamed file changes that mtime, so the
+ * next refresh reads just that directory.
+ */
+async function buildIndex(
+  roots: readonly RevealRoot[],
+  previous: FileIndex | null,
+): Promise<FileIndex> {
   const byName = new Map<string, IndexedFile[]>();
+  const snaps = new Map<string, DirSnap>();
+  const prevSnaps = previous?.snaps ?? new Map<string, DirSnap>();
   let budget = MAX_FILES;
 
-  const add = (absolutePath: string): void => {
-    const name = path.basename(absolutePath).toLowerCase();
-    const existing = byName.get(name);
-    if (existing === undefined) {
-      byName.set(name, [
-        { absolutePath, segments: splitLower(absolutePath) },
-      ]);
-      return;
-    }
-    if (existing.length >= MAX_PER_NAME) return;
-    existing.push({ absolutePath, segments: splitLower(absolutePath) });
-  };
-
-  // Breadth-first, so when the budget runs out what is missing is the deepest
-  // corner of the tree rather than whole roots listed later.
-  let frontier = outermost(roots).map((root) => ({
+  let frontier: WalkNode[] = outermost(roots).map((root) => ({
     dir: root.rootPath,
     depth: 0,
   }));
   while (frontier.length > 0 && budget > 0) {
-    const next: typeof frontier = [];
-    const listings = await Promise.all(
-      frontier.map(async (node) => {
-        try {
-          return {
-            node,
-            entries: await readdir(node.dir, { withFileTypes: true }),
-          };
-        } catch {
-          return { node, entries: [] };
-        }
-      }),
+    const next: WalkNode[] = [];
+    const listings = await mapLimit(frontier, WALK_CONCURRENCY, (node) =>
+      readDir(node, prevSnaps.get(node.dir)),
     );
-    for (const { node, entries } of listings) {
-      for (const entry of entries) {
-        if (budget <= 0) break;
+    for (const listing of listings) {
+      if (listing.kind === "missing") continue;
+      if (listing.kind === "reuse") {
+        snaps.set(listing.node.dir, listing.snap);
+        for (const name of listing.snap.fileNames) {
+          if (budget <= 0) break;
+          budget -= 1;
+          addFile(byName, path.join(listing.node.dir, name));
+        }
+        if (listing.node.depth + 1 <= MAX_DEPTH) {
+          for (const name of listing.snap.childNames) {
+            next.push({
+              dir: path.join(listing.node.dir, name),
+              depth: listing.node.depth + 1,
+            });
+          }
+        }
+        continue;
+      }
+
+      const fileNames: string[] = [];
+      const childNames: string[] = [];
+      // A snap is only useful if it names every child. Stopping at the file
+      // budget must not freeze a partial listing under the new mtime, or the
+      // files past the cut would never be indexed.
+      let complete = true;
+      for (const entry of listing.entries) {
         if (entry.isDirectory()) {
           if (SKIP_DIR_NAMES.has(entry.name)) continue;
-          if (node.depth + 1 > MAX_DEPTH) continue;
-          next.push({ dir: path.join(node.dir, entry.name), depth: node.depth + 1 });
+          if (listing.node.depth + 1 > MAX_DEPTH) continue;
+          childNames.push(entry.name);
+          next.push({
+            dir: path.join(listing.node.dir, entry.name),
+            depth: listing.node.depth + 1,
+          });
           continue;
         }
         // Symlinks are neither followed nor indexed: a link's target is
         // already indexed under its real name, and following one invites a
         // cycle the budget would have to pay for.
         if (!entry.isFile()) continue;
+        if (budget <= 0) {
+          complete = false;
+          break;
+        }
         budget -= 1;
-        add(path.join(node.dir, entry.name));
+        fileNames.push(entry.name);
+        addFile(byName, path.join(listing.node.dir, entry.name));
+      }
+      if (complete) {
+        snaps.set(listing.node.dir, {
+          mtimeMs: listing.mtimeMs,
+          fileNames,
+          childNames,
+        });
       }
     }
     frontier = next;
   }
-  return { at: Date.now(), byName };
-}
-
-function splitLower(absolutePath: string): string[] {
-  return absolutePath
-    .toLowerCase()
-    .split(path.sep)
-    .filter((segment) => segment !== "");
+  // Hitting the file ceiling stops the walk before deeper directories are
+  // visited. Keep their previous snaps, or the next refresh re-reads the
+  // whole tree just because it was large.
+  if (budget <= 0) {
+    for (const [dir, snap] of prevSnaps) {
+      if (!snaps.has(dir)) snaps.set(dir, snap);
+    }
+  }
+  return { at: Date.now(), byName, snaps };
 }
 
 async function getIndex(roots: readonly RevealRoot[]): Promise<FileIndex> {
@@ -149,7 +254,8 @@ async function getIndex(roots: readonly RevealRoot[]): Promise<FileIndex> {
     return cached.index;
   }
   if (building !== null && building.key === key) return building.promise;
-  const promise = buildIndex(roots).then(
+  const previous = cached !== null && cached.key === key ? cached.index : null;
+  const promise = buildIndex(roots, previous).then(
     (index) => {
       cached = { key, index };
       building = null;
@@ -195,9 +301,9 @@ function wantedSegments(raw: string): string[] | null {
 }
 
 function endsWithSegments(file: IndexedFile, wanted: string[]): boolean {
-  if (wanted.length > file.segments.length) return false;
-  const offset = file.segments.length - wanted.length;
-  return wanted.every((segment, i) => file.segments[offset + i] === segment);
+  if (wanted.length > file.depth) return false;
+  const suffix = wanted.join("/");
+  return file.lowerPath === suffix || file.lowerPath.endsWith(`/${suffix}`);
 }
 
 /** The deepest candidate root containing the hit, so the tree re-roots close to it. */
@@ -227,8 +333,8 @@ function pick(matches: readonly IndexedFile[]): IndexedFile | null {
       best = match;
       continue;
     }
-    if (match.segments.length !== best.segments.length) {
-      if (match.segments.length < best.segments.length) best = match;
+    if (match.depth !== best.depth) {
+      if (match.depth < best.depth) best = match;
       continue;
     }
     if (match.absolutePath.length !== best.absolutePath.length) {
@@ -312,15 +418,10 @@ function normaliseQuery(raw: string): { needle: string; hasSlash: boolean } | nu
   return { needle: cleaned.toLowerCase(), hasSlash: cleaned.includes("/") };
 }
 
-/** The indexed path as `a/b/c`, which is how a typed query is spelled. */
-function joined(file: IndexedFile): string {
-  return file.segments.join("/");
-}
-
 function scoreByPath(file: IndexedFile, needle: string): number | null {
-  const path = joined(file);
-  if (path.endsWith(`/${needle}`) || path === needle) return 0;
-  return path.includes(needle) ? 1 : null;
+  const filePath = file.lowerPath;
+  if (filePath.endsWith(`/${needle}`) || filePath === needle) return 0;
+  return filePath.includes(needle) ? 1 : null;
 }
 
 function scoreByName(name: string, needle: string): number | null {
@@ -336,8 +437,8 @@ function scoreByName(name: string, needle: string): number | null {
  */
 function compare(a: Scored, b: Scored): number {
   if (a.tier !== b.tier) return a.tier - b.tier;
-  if (a.file.segments.length !== b.file.segments.length) {
-    return a.file.segments.length - b.file.segments.length;
+  if (a.file.depth !== b.file.depth) {
+    return a.file.depth - b.file.depth;
   }
   if (a.file.absolutePath.length !== b.file.absolutePath.length) {
     return a.file.absolutePath.length - b.file.absolutePath.length;

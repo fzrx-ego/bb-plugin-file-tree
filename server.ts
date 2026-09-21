@@ -2,7 +2,7 @@ import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { rpcContract } from "./contract";
 import { createBlankMarkdown } from "./src/blank-markdown";
 import { deleteFile } from "./src/delete-file";
-import { listDir } from "./src/listing";
+import { invalidateListings, listDir } from "./src/listing";
 import { copyFileToClipboard, revealInFinder } from "./src/os-actions";
 import {
   makeSearchRootsGetter,
@@ -98,8 +98,16 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     listDir: (input) => listDir(bb, input),
     revealInFinder: (input) => revealInFinder(input),
     copyFileToClipboard: (input) => copyFileToClipboard(input),
-    createBlankMarkdown: (input) => createBlankMarkdown(bb, input),
-    deleteFile: (input) => deleteFile(bb, input),
+    createBlankMarkdown: async (input) => {
+      const result = await createBlankMarkdown(bb, input);
+      if (result.ok) invalidateListings(input.rootId);
+      return result;
+    },
+    deleteFile: async (input) => {
+      const result = await deleteFile(bb, input);
+      if (result.ok) invalidateListings(input.rootId);
+      return result;
+    },
   });
 
   bb.onDispose(() => {
