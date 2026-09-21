@@ -15,7 +15,7 @@ import type { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
 /** One letter matches half the disk; two is where a list starts to mean something. */
 const MIN_QUERY_LENGTH = 2;
 /** Long enough to skip the middle of a pasted path, short enough to feel typed. */
-const DEBOUNCE_MS = 140;
+const DEBOUNCE_MS = 280;
 const LIMIT = 20;
 
 type TreeModel = ReturnType<typeof useWorkspaceTree>;

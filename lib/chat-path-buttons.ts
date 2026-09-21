@@ -32,8 +32,20 @@ const FIXED_ATTR = "data-file-tree-fixed";
 // ordinary text or a `file:` link as well, but must never receive a reveal button.
 const CHAT_MESSAGE_SELECTOR = ".group\\/message";
 
-function isChatContent(element: Element): boolean {
-  return element.closest(CHAT_MESSAGE_SELECTOR) !== null;
+/** Nodes of `selector` that sit inside a rendered message, not the whole document. */
+function chatQuery<T extends Element>(selector: string): T[] {
+  const found: T[] = [];
+  const messages = document.querySelectorAll(CHAT_MESSAGE_SELECTOR);
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i];
+    if (message === undefined) continue;
+    const nodes = message.querySelectorAll(selector);
+    for (let j = 0; j < nodes.length; j += 1) {
+      const node = nodes[j];
+      if (node !== undefined) found.push(node as T);
+    }
+  }
+  return found;
 }
 
 /**
@@ -172,10 +184,7 @@ export function mountChatPathButtons(
   };
 
   const sweepAnchors = (): void => {
-    for (const anchor of Array.from(
-      document.querySelectorAll<HTMLAnchorElement>('a[href^="file:"]'),
-    )) {
-      if (!isChatContent(anchor)) continue;
+    for (const anchor of chatQuery<HTMLAnchorElement>('a[href^="file:"]')) {
       const href = anchorTargetPath(anchor);
       const text = textOf(anchor);
       if (href === null || text === "") {
@@ -199,7 +208,7 @@ export function mountChatPathButtons(
     anchorTimer = window.setTimeout(() => {
       anchorTimer = null;
       void flushAnchors();
-    }, 150);
+    }, 400);
   };
 
   const flushAnchors = async (): Promise<void> => {
@@ -225,8 +234,16 @@ export function mountChatPathButtons(
   };
 
   let lastReport = "";
+  let sweepTimer: number | null = null;
+  /** A mutation arrived while a sweep was already running or waiting. */
+  let sweepAgain = false;
   const sweep = (): void => {
-    sweepQueued = false;
+    sweepTimer = null;
+    if (signal.aborted) {
+      sweepQueued = false;
+      sweepAgain = false;
+      return;
+    }
     let codes = 0;
     let candidates = 0;
     let wanted = 0;
@@ -234,8 +251,7 @@ export function mountChatPathButtons(
     // gives them its own "open" glyph, which is a different action from
     // revealing the file in the tree.
     sweepAnchors();
-    for (const code of Array.from(document.querySelectorAll("code, a"))) {
-      if (!isChatContent(code)) continue;
+    for (const code of chatQuery<Element>("code, a")) {
       // A `<code>` inside an `<a>` matches twice; let the inner one win so the
       // path gets one button, not two.
       if (code.querySelector("code, a") !== null) continue;
@@ -265,12 +281,24 @@ export function mountChatPathButtons(
       lastReport = line;
       report(`${line} (codes=${codes} candidates=${candidates})`);
     }
+    if (sweepAgain) {
+      sweepAgain = false;
+      sweepTimer = window.setTimeout(sweep, 250);
+      return;
+    }
+    sweepQueued = false;
   };
 
   const queueSweep = (): void => {
-    if (sweepQueued) return;
+    if (signal.aborted) return;
+    // Keep the lock until the sweep finishes. Clearing it at the start let
+    // every streaming token schedule another full pass.
+    if (sweepQueued) {
+      sweepAgain = true;
+      return;
+    }
     sweepQueued = true;
-    requestAnimationFrame(sweep);
+    sweepTimer = window.setTimeout(sweep, 250);
   };
 
   const scheduleFlush = (): void => {
@@ -278,7 +306,7 @@ export function mountChatPathButtons(
     flushTimer = window.setTimeout(() => {
       flushTimer = null;
       void flush();
-    }, 150);
+    }, 400);
   };
 
   const flush = async (): Promise<void> => {
@@ -377,12 +405,40 @@ export function mountChatPathButtons(
     document.addEventListener(type, onEarly, opts);
   }
 
-  const observer = new MutationObserver(queueSweep);
+  const insideChat = (node: Node): boolean => {
+    const element = node instanceof Element ? node : node.parentElement;
+    if (element === null) return false;
+    return element.closest(CHAT_MESSAGE_SELECTOR) !== null;
+  };
+
+  const containsChat = (node: Node): boolean => {
+    if (!(node instanceof Element)) return false;
+    if (node.matches(CHAT_MESSAGE_SELECTOR)) return true;
+    return node.querySelector(CHAT_MESSAGE_SELECTOR) !== null;
+  };
+
+  const observer = new MutationObserver((records) => {
+    // The tree, toasts, and the composer rewrite the document constantly.
+    // Only a change inside a chat message, or a newly inserted message, can
+    // add a path. Checking the mutation target's whole subtree would match
+    // every body update, because the messages are already in the document.
+    const relevant = records.some(
+      (record) =>
+        insideChat(record.target) ||
+        Array.from(record.addedNodes).some(
+          (node) => insideChat(node) || containsChat(node),
+        ),
+    );
+    if (relevant) queueSweep();
+  });
   observer.observe(document.body, { childList: true, subtree: true });
   signal.addEventListener(
     "abort",
     () => {
       observer.disconnect();
+      if (sweepTimer !== null) window.clearTimeout(sweepTimer);
+      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      if (anchorTimer !== null) window.clearTimeout(anchorTimer);
       for (const button of Array.from(
         document.querySelectorAll(`button[${BUTTON_ATTR}]`),
       )) {
