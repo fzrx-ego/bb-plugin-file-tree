@@ -16,7 +16,7 @@ Search and chat paths ask the same question of the same index. When a message na
 
 The folder selector lists project sources and the current thread workspace. Set **Root folder for personal threads** to a path such as `~/Documents` to add it to the selector. Hidden and ignored folders (`.claude`, `node_modules`, `.git`, …) stay hidden unless you turn them on in settings. Search roots (default `~/Documents`, one path per line) are the extra places a chat path may land.
 
-Open in Finder and Copy File run on the machine that holds the files. Copy File puts a real file on the macOS or Windows clipboard so Finder paste drops a copy, not a string. Finder reveal uses macOS `open -R`.
+Open in Finder and Copy File are available for files on this computer. Copy File puts a real file on the macOS or Windows clipboard so Finder paste drops a copy, not a string. Finder reveal uses macOS `open -R`.
 
 ## First step
 

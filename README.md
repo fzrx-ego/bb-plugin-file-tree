@@ -23,7 +23,7 @@ Or search **File Tree** in BB Community.
 - Right-click to add the absolute path to an open chat draft, create a blank `.md` in that folder, delete a file, copy a relative or absolute path, copy the file itself, or reveal it in Finder. When several drafts are open, choose the target in the file menu. Right-click the root name at the top of the tree to create the file there. A new markdown file is named `untitled.md` (or `untitled-2.md`, …) and opens in the external editor so you can paste into it. Delete asks for confirmation and only applies to files, not folders.
 - Paths written in chat can jump the tree to that file, and so do bare file names like `AGENTS-base.md`. Search roots (default `~/Documents`) cover folders outside the current checkout.
 
-Copy File uses the macOS or Windows file clipboard. Open in Finder uses macOS `open -R`.
+Copy File uses the macOS or Windows file clipboard. Open in Finder uses macOS `open -R`. These actions are available for files on this computer.
 
 ## Settings
 
