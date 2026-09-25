@@ -28,7 +28,7 @@ type TreeModel = ReturnType<typeof useWorkspaceTree>;
  * chat goes through. So a hit in another project re-roots the tree exactly as
  * it already does, and there is one answer to "where did this open from".
  */
-export function useFileSearch(threadId: string | null, tree: TreeModel) {
+export function useFileSearch(tree: TreeModel) {
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
   const [query, setQuery] = useState("");
@@ -41,9 +41,10 @@ export function useFileSearch(threadId: string | null, tree: TreeModel) {
 
   const trimmed = query.trim();
   const isActive = trimmed !== "";
+  const rootId = tree.active?.rootId ?? null;
 
   useEffect(() => {
-    if (threadId === null || trimmed.length < MIN_QUERY_LENGTH) {
+    if (rootId === null || trimmed.length < MIN_QUERY_LENGTH) {
       setHits([]);
       setIsSearching(false);
       return;
@@ -52,7 +53,7 @@ export function useFileSearch(threadId: string | null, tree: TreeModel) {
     setIsSearching(true);
     const timer = setTimeout(() => {
       void rpc
-        .call("searchFiles", { threadId, query: trimmed, limit: LIMIT })
+        .call("searchFilesInRoot", { rootId, query: trimmed, limit: LIMIT })
         .then((result) => {
           if (requestId.current !== id) return;
           setHits(result.hits);
@@ -66,7 +67,7 @@ export function useFileSearch(threadId: string | null, tree: TreeModel) {
         });
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [rpc, threadId, trimmed]);
+  }, [rpc, rootId, trimmed]);
 
   const clear = useCallback(() => {
     requestId.current += 1;

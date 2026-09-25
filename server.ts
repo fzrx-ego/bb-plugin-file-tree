@@ -6,12 +6,14 @@ import { invalidateListings, listDir } from "./src/listing";
 import { copyFileToClipboard, revealInFinder } from "./src/os-actions";
 import {
   makeSearchRootsGetter,
+  resolveInRoot,
   resolveFileAnchors,
   resolveInWorkspace,
   resolvePaths,
   searchFiles,
+  searchFilesInRoot,
 } from "./src/reveal";
-import { workspaceForProject, workspaceForThread } from "./src/workspace";
+import { listRootChoices, workspaceForProject, workspaceForThread } from "./src/workspace";
 
 export { rpcContract } from "./contract";
 
@@ -21,7 +23,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   const settings = bb.settings.define({
     openByDefault: {
       type: "boolean",
-      label: "Show the file tree on the right when a thread opens",
+      label: "Show the pinned file tree when BB opens",
       default: true,
     },
     showSkipped: {
@@ -57,6 +59,11 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   };
 
   bb.rpc.register(rpcContract, {
+    listRootChoices: async (input) => ({
+      choices: await listRootChoices(bb, input, await getTreeRoot()),
+    }),
+    resolveInRoot: (input) => resolveInRoot(bb, input, getSearchRoots),
+    searchFilesInRoot: (input) => searchFilesInRoot(bb, input, getSearchRoots),
     workspaceForThread: async ({ threadId }) =>
       workspaceForThread(bb, threadId, await getTreeRoot()),
     workspaceForProject: async ({ projectId }) =>

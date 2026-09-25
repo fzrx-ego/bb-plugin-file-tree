@@ -1,36 +1,25 @@
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { FileTreeHeaderAction } from "@/components/FileTreeHeaderAction";
-import { FileTreePanel } from "@/components/FileTreePanel";
+import { GlobalFileTreeRail } from "@/components/GlobalFileTreeRail";
 import { NewThreadFileTreeAction } from "@/components/NewThreadFileTreeAction";
+import { ChatDraftBridge } from "@/components/ChatDraftBridge";
 import { requestSearchFocus } from "@/lib/search-focus-bus";
+import { toggleRailOpen, writeStoredOpen } from "@/lib/rail-state";
 
 export default definePluginApp((app) => {
+  app.slots.experimental_appOverlay({ id: "global-file-tree", component: GlobalFileTreeRail });
 
   app.slots.experimental_threadHeaderAction({
     id: "file-tree-toggle",
     title: "File tree",
-    component: ({ threadId, isCompactViewport }) => (
-      <FileTreeHeaderAction
-        threadId={threadId}
-        isCompactViewport={isCompactViewport}
-      />
-    ),
+    component: ({ threadId }) => <FileTreeHeaderAction threadId={threadId} />,
   });
 
-  app.slots.threadPanelAction({
-    id: "file-tree",
+  app.slots.sidebarFooterAction({
+    id: "file-tree-toggle",
     title: "File tree",
-    icon: "Folder",
-    layout: "flush",
-    component: ({ threadId }) => <FileTreePanel threadId={threadId} />,
-  });
-
-  app.slots.experimental_newThreadPanelAction({
-    id: "file-tree",
-    title: "File tree",
-    icon: "Folder",
-    layout: "flush",
-    component: ({ projectId }) => <FileTreePanel threadId={null} projectId={projectId} />,
+    icon: "FolderTree",
+    run: toggleRailOpen,
   });
 
   app.composer.customize({
@@ -39,22 +28,26 @@ export default definePluginApp((app) => {
     actions: [{ id: "open-file-tree", component: NewThreadFileTreeAction }],
   });
 
+  app.composer.customize({
+    id: "file-tree-chat-draft",
+    scopes: ["thread", "queued-message", "side-chat", "new-thread"],
+    banners: [{ id: "bridge", chrome: "bare", component: ChatDraftBridge }],
+  });
+
   app.slots.commandPaletteAction({
     id: "find-file-in-tree",
     title: "File tree: find a file",
-    isAvailable: ({ threadId }) => threadId !== null,
-    run: ({ openPanel }) => {
-      openPanel({ actionId: "file-tree", title: "File tree" });
+    run: () => {
+      writeStoredOpen(true);
       requestSearchFocus();
     },
   });
 
   app.slots.commandPaletteAction({
     id: "open-file-tree",
-    title: "File tree: open in the right panel",
-    isAvailable: ({ threadId }) => threadId !== null,
-    run: ({ openPanel }) => {
-      openPanel({ actionId: "file-tree", title: "File tree" });
+    title: "File tree: show pinned folder",
+    run: () => {
+      writeStoredOpen(true);
     },
   });
 });

@@ -13,7 +13,7 @@ import type {
 import { findByName, searchByQuery } from "./name-index";
 import { mapLimit } from "./pool";
 import { resolveUnderRoot, toRelativePath } from "./paths";
-import { registerRoot } from "./roots";
+import { registerRoot, resolveRoot } from "./roots";
 import { workspaceForThread } from "./workspace";
 
 /**
@@ -210,6 +210,47 @@ export async function resolveInWorkspace(
   return { ok: false, message: `Not found in any project: ${input.path}` };
 }
 
+/** Resolve a file against the pinned navigator root, independent of the route. */
+export async function resolveInRoot(
+  bb: BbPluginApi,
+  input: { rootId: string; path: string },
+  getSearchRoots: SearchRootsGetter,
+): Promise<RevealResult> {
+  const root = resolveRoot(input.rootId);
+  if (root === undefined) throw new Error("File tree root expired. Choose the folder again.");
+  const workspace: Workspace = {
+    environmentId: null,
+    hostId: root.hostId,
+    rootPath: root.rootPath,
+    rootName: path.basename(root.rootPath) || root.rootPath,
+    rootId: input.rootId,
+  };
+  const here = await resolveOne(bb, workspace, input.path);
+  if (here !== null) {
+    return { ok: true, relativePath: here.relativePath, isDirectory: here.isDirectory, root: null };
+  }
+  // An absolute path names one specific folder; check it before fuzzy name matches.
+  if (path.isAbsolute(expandHome(input.path))) {
+    const exactElsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots);
+    if (exactElsewhere !== null) {
+      return { ok: true, relativePath: exactElsewhere.relativePath, isDirectory: exactElsewhere.isDirectory, root: exactElsewhere.root };
+    }
+  }
+  const roots = [
+    { hostId: root.hostId, rootPath: root.rootPath, rootName: workspace.rootName, rootId: input.rootId },
+    ...(await candidateRoots(bb, root.rootPath, root.hostId, getSearchRoots)),
+  ];
+  const named = await findByName(roots, input.path);
+  if (named !== null) {
+    return { ok: true, relativePath: named.relativePath, isDirectory: named.isDirectory, root: named.root };
+  }
+  const elsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots);
+  if (elsewhere !== null) {
+    return { ok: true, relativePath: elsewhere.relativePath, isDirectory: elsewhere.isDirectory, root: elsewhere.root };
+  }
+  return { ok: false, message: `Not found in any project: ${input.path}` };
+}
+
 /**
  * Find a file by what the user typed into the tree's search box.
  *
@@ -256,6 +297,36 @@ export async function searchFiles(
         absolutePath: hit.absolutePath,
         rootName: hit.root.rootName,
       })),
+  };
+}
+
+export async function searchFilesInRoot(
+  bb: BbPluginApi,
+  input: { rootId: string; query: string; limit: number },
+  getSearchRoots: SearchRootsGetter,
+): Promise<{ hits: SearchHit[] }> {
+  const root = resolveRoot(input.rootId);
+  if (root === undefined) throw new Error("File tree root expired. Choose the folder again.");
+  const here: RevealRoot = {
+    hostId: root.hostId,
+    rootPath: root.rootPath,
+    rootName: path.basename(root.rootPath) || root.rootPath,
+    rootId: input.rootId,
+  };
+  const roots = [here, ...(await candidateRoots(bb, root.rootPath, root.hostId, getSearchRoots))];
+  // The indexed search ranks matching names globally. A pinned explorer should
+  // put its own files first when the same name exists in several projects.
+  const found = await searchByQuery(roots, input.query, 2000);
+  found.sort((a, b) =>
+    Number(b.root.rootId === input.rootId) - Number(a.root.rootId === input.rootId),
+  );
+  return {
+    hits: found.filter((hit) => !isHidden(hit.relativePath)).slice(0, input.limit).map((hit) => ({
+      name: hit.name,
+      relativePath: hit.relativePath,
+      absolutePath: hit.absolutePath,
+      rootName: hit.root.rootName,
+    })),
   };
 }
 
@@ -397,7 +468,8 @@ async function candidateRoots(
   fallbackHostId: string,
   getSearchRoots: SearchRootsGetter,
 ): Promise<RevealRoot[]> {
-  const cached = rootsCache.get(currentRoot);
+  const cacheKey = `${fallbackHostId}\n${currentRoot}`;
+  const cached = rootsCache.get(cacheKey);
   if (cached !== undefined && Date.now() - cached.at < ROOTS_TTL_MS) {
     return cached.roots;
   }
@@ -434,7 +506,7 @@ async function candidateRoots(
       add(path.join(configured, entry.name), entry.name, fallbackHostId);
     }
   }
-  rootsCache.set(currentRoot, { at: Date.now(), roots });
+  rootsCache.set(cacheKey, { at: Date.now(), roots });
   return roots;
 }
 

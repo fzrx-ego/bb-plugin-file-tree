@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import type { WorkspaceResult } from "../contract";
+import type { RootChoice, WorkspaceResult } from "../contract";
 import { registerRoot } from "./roots";
 
 function expandHome(input: string): string {
@@ -104,4 +104,57 @@ export async function workspaceForProject(
       rootId: registerRoot(source.hostId, source.path),
     },
   };
+}
+
+/** Roots offered by the window-wide tree. IDs name durable BB records, never client paths. */
+export async function listRootChoices(
+  bb: BbPluginApi,
+  input: { currentThreadId: string | null; pinnedThreadId: string | null },
+  treeRoot?: string,
+): Promise<RootChoice[]> {
+  const projects = await bb.sdk.projects.list({ includePersonal: true });
+  const choices: RootChoice[] = [];
+  for (const project of projects) {
+    if (project.kind === "personal") {
+      if (treeRoot === undefined) continue;
+      const resolved = await workspaceForProject(bb, project.id, treeRoot);
+      if (resolved.ok) {
+        choices.push({ id: `personal:${project.id}`, label: `${project.name} · ${resolved.workspace.rootPath}`, projectId: project.id, workspace: resolved.workspace });
+      }
+      continue;
+    }
+    for (const source of project.sources) {
+      const rootPath = source.path;
+      choices.push({
+        id: `source:${source.id}`,
+        label: `${project.name} · ${rootPath}`,
+        projectId: project.id,
+        workspace: {
+          environmentId: null,
+          hostId: source.hostId,
+          rootPath,
+          rootName: path.basename(rootPath) || rootPath,
+          rootId: registerRoot(source.hostId, rootPath),
+        },
+      });
+    }
+  }
+
+  const threadIds = new Set([input.currentThreadId, input.pinnedThreadId].filter((id): id is string => id !== null));
+  for (const threadId of threadIds) {
+    try {
+      const resolved = await workspaceForThread(bb, threadId);
+      if (resolved.ok) {
+        choices.unshift({
+          id: `thread:${threadId}`,
+          label: `Thread workspace · ${resolved.workspace.rootPath}`,
+          projectId: null,
+          workspace: resolved.workspace,
+        });
+      }
+    } catch (cause) {
+      bb.log.warn(`Could not load file-tree root for thread ${threadId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+  return choices;
 }
