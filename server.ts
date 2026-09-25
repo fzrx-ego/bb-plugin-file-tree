@@ -1,9 +1,12 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { rpcContract } from "./contract";
+import { hostContract } from "./host-contract";
+import type { PathProbe } from "./src/reveal";
 import { createBlankMarkdown } from "./src/blank-markdown";
 import { deleteFile } from "./src/delete-file";
 import { invalidateListings, listDir } from "./src/listing";
 import { copyFileToClipboard, revealInFinder } from "./src/os-actions";
+import { resolveRoot } from "./src/roots";
 import {
   makeSearchRootsGetter,
   resolveInRoot,
@@ -19,6 +22,15 @@ export { rpcContract } from "./contract";
 
 export default async function plugin(bb: BbPluginApi): Promise<void> {
   bb.log.info("loaded");
+  const host = bb.hosts.experimental_client({ contract: hostContract });
+  const probe: PathProbe = (hostId, rootPath, relativePath) =>
+    host.call("statPath", { rootPath, relativePath }, { hostId });
+  const onThisComputer = async (rootId: string): Promise<boolean> => {
+    const root = resolveRoot(rootId);
+    if (root === undefined) throw new Error("File tree root expired. Choose the folder again.");
+    const config = await bb.sdk.system.config();
+    return root.hostId === config.primaryHostId;
+  };
 
   const settings = bb.settings.define({
     openByDefault: {
@@ -28,7 +40,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     },
     showSkipped: {
       type: "boolean",
-      label: "Show ignored folders (node_modules, .git, dist, …)",
+      label: "Show hidden and ignored folders (.claude, node_modules, .git, …)",
       default: false,
     },
     treeRoot: {
@@ -62,14 +74,14 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     listRootChoices: async (input) => ({
       choices: await listRootChoices(bb, input, await getTreeRoot()),
     }),
-    resolveInRoot: (input) => resolveInRoot(bb, input, getSearchRoots),
+    resolveInRoot: (input) => resolveInRoot(bb, input, getSearchRoots, probe),
     searchFilesInRoot: (input) => searchFilesInRoot(bb, input, getSearchRoots),
     workspaceForThread: async ({ threadId }) =>
       workspaceForThread(bb, threadId, await getTreeRoot()),
     workspaceForProject: async ({ projectId }) =>
       workspaceForProject(bb, projectId, await getTreeRoot()),
     resolveInWorkspace: async (input) => {
-      const result = await resolveInWorkspace(bb, input, getSearchRoots);
+      const result = await resolveInWorkspace(bb, input, getSearchRoots, probe);
       bb.log.info(
         `reveal ${JSON.stringify(input.path)} -> ${
           result.ok ? `${result.relativePath} (root ${result.root?.rootName ?? "thread"})` : result.message
@@ -82,7 +94,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       return { ok: true };
     },
     resolvePaths: async (input) => {
-      const result = await resolvePaths(bb, input, getSearchRoots);
+      const result = await resolvePaths(bb, input, getSearchRoots, probe);
       bb.log.info(
         `resolvePaths: ${input.paths.length} candidates -> ${result.known.length} known`,
       );
@@ -96,15 +108,22 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       return result;
     },
     resolveFileAnchors: async (input) => {
-      const result = await resolveFileAnchors(bb, input, getSearchRoots);
+      const result = await resolveFileAnchors(bb, input, getSearchRoots, probe);
       for (const fix of result.fixes) {
         bb.log.info(`anchor fix ${JSON.stringify(fix.text)}: ${fix.href} -> ${fix.absolutePath}`);
       }
       return result;
     },
-    listDir: (input) => listDir(bb, input),
-    revealInFinder: (input) => revealInFinder(input),
-    copyFileToClipboard: (input) => copyFileToClipboard(input),
+    listDir: (input) => listDir(input, ({ hostId, ...request }) =>
+      host.call("listDirectory", request, { hostId })),
+    revealInFinder: async (input) => {
+      if (!await onThisComputer(input.rootId)) return { ok: false, message: "This file is on another computer." };
+      return revealInFinder(input);
+    },
+    copyFileToClipboard: async (input) => {
+      if (!await onThisComputer(input.rootId)) return { ok: false, message: "This file is on another computer." };
+      return copyFileToClipboard(input);
+    },
     createBlankMarkdown: async (input) => {
       const result = await createBlankMarkdown(bb, input);
       if (result.ok) invalidateListings(input.rootId);

@@ -32,7 +32,7 @@ bb plugin config file-tree
 ```
 
 - Show the pinned tree when BB opens
-- Show ignored folders (`node_modules`, `.git`, `dist`, …)
+- Show hidden and ignored folders (`.claude`, `node_modules`, `.git`, …)
 - Root folder for personal threads — set `~/Documents` to offer it as a pinned folder. Project sources and thread workspaces are also available in the folder selector.
 - Folders to search for paths mentioned in chat
 

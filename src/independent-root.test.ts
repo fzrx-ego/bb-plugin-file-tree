@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { statHostPath } from "./host-listing";
 import { resolveInRoot, searchFilesInRoot } from "./reveal";
 import { listRootChoices } from "./workspace";
 
@@ -23,6 +24,7 @@ test("pinned project root lists and searches its files while another thread is a
     ];
     const bb = {
       sdk: {
+        system: { config: async () => ({ primaryHostId: "host-1" }) },
         projects: { list: async () => projects },
         threads: { get: async () => ({ environmentId: "env-first", projectId: "project-first" }) },
         environments: { get: async () => ({ id: "env-first", hostId: "host-1", path: first }) },
@@ -38,15 +40,16 @@ test("pinned project root lists and searches its files while another thread is a
     const search = await searchFilesInRoot(bb, { rootId: root.rootId, query: "picked", limit: 10 }, async () => []);
     assert.equal(search.hits[0]?.absolutePath, path.join(pinned, "picked.md"));
 
-    const local = await resolveInRoot(bb, { rootId: root.rootId, path: "picked.md" }, async () => []);
+    const probe = (_hostId: string, rootPath: string, relativePath: string) => statHostPath(rootPath, relativePath);
+    const local = await resolveInRoot(bb, { rootId: root.rootId, path: "picked.md" }, async () => [], probe);
     assert.equal(local.ok, true);
     if (local.ok) assert.equal(local.root, null);
 
-    const elsewhere = await resolveInRoot(bb, { rootId: root.rootId, path: path.join(first, "other.md") }, async () => []);
+    const elsewhere = await resolveInRoot(bb, { rootId: root.rootId, path: path.join(first, "other.md") }, async () => [], probe);
     assert.equal(elsewhere.ok, true);
     if (elsewhere.ok) assert.equal(elsewhere.root?.rootPath, first);
 
-    const absoluteDuplicate = await resolveInRoot(bb, { rootId: root.rootId, path: path.join(first, "picked.md") }, async () => []);
+    const absoluteDuplicate = await resolveInRoot(bb, { rootId: root.rootId, path: path.join(first, "picked.md") }, async () => [], probe);
     assert.equal(absoluteDuplicate.ok, true);
     if (absoluteDuplicate.ok) assert.equal(absoluteDuplicate.root?.rootPath, first);
   } finally {
@@ -63,6 +66,7 @@ test("personal configured folder and actual thread workspace stay separate choic
     await mkdir(configuredPath);
     const bb = {
       sdk: {
+        system: { config: async () => ({ primaryHostId: "host-1" }) },
         projects: { list: async () => [
           { id: "proj_personal", kind: "personal", name: "Personal", sources: [] },
           { id: "project-standard", kind: "standard", name: "Standard", sources: [{ id: "source-standard", hostId: "host-1", path: base, isDefault: true }] },

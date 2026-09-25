@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { subscribeReveal } from "@/lib/reveal-bus";
+import { includeRevealedChild, type VisibleReveal } from "@/lib/visible-reveal";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
 
 function ancestorChain(relativePath: string): string[] {
@@ -36,21 +37,40 @@ export function useWorkspaceTree(root: Workspace | null) {
   dirsRef.current = dirs;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set([""]));
   const [selected, setSelected] = useState<string | null>(null);
+  const [visibleReveal, setVisibleReveal] = useState<VisibleReveal | null>(null);
 
   const pinnedKey = root === null ? "" : `${root.hostId}\n${root.rootPath}`;
   useEffect(() => {
     setRerooted(null);
     setExpanded(new Set([""]));
     setSelected(null);
+    setVisibleReveal(null);
   }, [pinnedKey]);
 
   const active = rerooted ?? root;
   const activeRef = useRef(active);
   activeRef.current = active;
   const activeRootId = active?.rootId ?? "";
+  const stateKey = `${activeRootId}\n${showSkipped}`;
+  const stateKeyRef = useRef(stateKey);
+  stateKeyRef.current = stateKey;
+  const loadVersions = useRef(new Map<string, number>());
+  const visibleDirs = useMemo(() => {
+    if (visibleReveal === null || visibleReveal.rootId !== activeRootId) return dirs;
+    const next: Record<string, DirState> = {};
+    for (const [parentPath, state] of Object.entries(dirs)) {
+      next[parentPath] = state.status === "ready"
+        ? { ...state, entries: includeRevealedChild(state.entries, parentPath, visibleReveal) }
+        : state;
+    }
+    return next;
+  }, [activeRootId, dirs, visibleReveal]);
 
   const loadDir = useCallback(
     async (workspace: Workspace, relativePath: string) => {
+      const loadKey = `${workspace.rootId}\n${relativePath}`;
+      const version = (loadVersions.current.get(loadKey) ?? 0) + 1;
+      loadVersions.current.set(loadKey, version);
       setDirs((prev) => ({ ...prev, [relativePath]: { status: "loading" } }));
       try {
         const { entries } = await rpc.call("listDir", {
@@ -58,10 +78,12 @@ export function useWorkspaceTree(root: Workspace | null) {
           relativePath,
           showSkipped,
         });
-        if (activeRef.current?.rootId !== workspace.rootId) return;
+        if (stateKeyRef.current !== `${workspace.rootId}\n${showSkipped}` ||
+          loadVersions.current.get(loadKey) !== version) return;
         setDirs((prev) => ({ ...prev, [relativePath]: { status: "ready", entries } }));
       } catch (cause) {
-        if (activeRef.current?.rootId !== workspace.rootId) return;
+        if (stateKeyRef.current !== `${workspace.rootId}\n${showSkipped}` ||
+          loadVersions.current.get(loadKey) !== version) return;
         setDirs((prev) => ({
           ...prev,
           [relativePath]: {
@@ -75,6 +97,7 @@ export function useWorkspaceTree(root: Workspace | null) {
   );
 
   useEffect(() => {
+    loadVersions.current.clear();
     dirsRef.current = {};
     setDirs({});
   }, [activeRootId, showSkipped]);
@@ -91,7 +114,7 @@ export function useWorkspaceTree(root: Workspace | null) {
   const reveal = useCallback(
     async (
       rawPath: string,
-      options?: { quiet?: boolean; threadId?: string },
+      options?: { threadId?: string },
     ): Promise<Revealed | null> => {
       const current = activeRef.current;
       if (current === null) return null;
@@ -130,7 +153,11 @@ export function useWorkspaceTree(root: Workspace | null) {
 
       const isPinned = root !== null && landedIn.hostId === root.hostId && landedIn.rootPath === root.rootPath;
       setRerooted(isPinned ? null : landedIn);
-      if (!isPinned && options?.quiet !== true) toast.message(`Showing ${landedIn.rootName}`);
+      setVisibleReveal({
+        rootId: landedIn.rootId,
+        relativePath: resolved.relativePath,
+        isDirectory: resolved.isDirectory,
+      });
       const chain = ancestorChain(resolved.relativePath);
       const toExpand = resolved.isDirectory ? chain : chain.slice(0, -1);
       setExpanded((prev) =>
@@ -168,12 +195,16 @@ export function useWorkspaceTree(root: Workspace | null) {
   const forgetPath = useCallback(async (relativePath: string) => {
     const workspace = activeRef.current;
     if (workspace === null) return;
+    setVisibleReveal((current) =>
+      current?.rootId === workspace.rootId && current.relativePath === relativePath ? null : current,
+    );
     const slash = relativePath.lastIndexOf("/");
     await loadDir(workspace, slash === -1 ? "" : relativePath.slice(0, slash));
     setSelected((current) => current === relativePath ? null : current);
   }, [loadDir]);
 
   const reload = useCallback(() => {
+    setVisibleReveal(null);
     if (rerooted !== null) {
       setRerooted(null);
       setExpanded(new Set([""]));
@@ -189,7 +220,7 @@ export function useWorkspaceTree(root: Workspace | null) {
     settingsLoading,
     active,
     isRerooted: rerooted !== null,
-    dirs,
+    dirs: visibleDirs,
     expanded,
     selected,
     setSelected,

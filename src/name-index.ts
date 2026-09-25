@@ -37,6 +37,8 @@ const INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_DEPTH = 10;
 /** A ceiling, not a target: ~50k entries is a normal Documents folder. */
 const MAX_FILES = 200_000;
+/** Cap directory metadata reads too: trees with many empty folders can otherwise run forever. */
+const MAX_DIRS = 10_000;
 /** A name shared by dozens of files is prose or a build artefact, not a hit. */
 const MAX_PER_NAME = 32;
 /** Parallel readdirs of a whole frontier stall the disk; a handful do not. */
@@ -167,14 +169,17 @@ async function buildIndex(
   const snaps = new Map<string, DirSnap>();
   const prevSnaps = previous?.snaps ?? new Map<string, DirSnap>();
   let budget = MAX_FILES;
+  let dirBudget = MAX_DIRS;
 
   let frontier: WalkNode[] = outermost(roots).map((root) => ({
     dir: root.rootPath,
     depth: 0,
   }));
-  while (frontier.length > 0 && budget > 0) {
+  while (frontier.length > 0 && budget > 0 && dirBudget > 0) {
     const next: WalkNode[] = [];
-    const listings = await mapLimit(frontier, WALK_CONCURRENCY, (node) =>
+    const boundedFrontier = frontier.slice(0, dirBudget);
+    dirBudget -= boundedFrontier.length;
+    const listings = await mapLimit(boundedFrontier, WALK_CONCURRENCY, (node) =>
       readDir(node, prevSnaps.get(node.dir)),
     );
     for (const listing of listings) {
@@ -239,7 +244,7 @@ async function buildIndex(
   // Hitting the file ceiling stops the walk before deeper directories are
   // visited. Keep their previous snaps, or the next refresh re-reads the
   // whole tree just because it was large.
-  if (budget <= 0) {
+  if (budget <= 0 || dirBudget <= 0) {
     for (const [dir, snap] of prevSnaps) {
       if (!snaps.has(dir)) snaps.set(dir, snap);
     }

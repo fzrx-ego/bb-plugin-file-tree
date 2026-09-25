@@ -1,4 +1,3 @@
-import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
@@ -15,6 +14,25 @@ import { mapLimit } from "./pool";
 import { resolveUnderRoot, toRelativePath } from "./paths";
 import { registerRoot, resolveRoot } from "./roots";
 import { workspaceForThread } from "./workspace";
+
+const localHostIds = new WeakMap<BbPluginApi, Promise<string | null>>();
+
+/** The name index reads this server's filesystem; never attribute it to a different host. */
+async function localIndexRoots(bb: BbPluginApi, roots: RevealRoot[]): Promise<RevealRoot[]> {
+  let known = localHostIds.get(bb);
+  if (known === undefined) {
+    known = bb.sdk.system.config().then(
+      ({ primaryHostId }) => primaryHostId,
+      (cause: unknown) => {
+        localHostIds.delete(bb);
+        throw cause;
+      },
+    );
+    localHostIds.set(bb, known);
+  }
+  const primaryHostId = await known;
+  return roots.filter((root) => root.hostId === primaryHostId);
+}
 
 /**
  * One rule decides everything: a string resolves if it names something
@@ -39,6 +57,35 @@ export interface Resolved {
   isDirectory: boolean;
   /** False when the search had to fall back to an ancestor or a name match. */
   exact: boolean;
+  ancestor: boolean;
+}
+
+export type PathProbe = (
+  hostId: string,
+  rootPath: string,
+  relativePath: string,
+) => Promise<{ isDirectory: boolean } | null>;
+
+/** Share in-flight checks within a request and keep one inaccessible root from hiding other projects. */
+function resilientProbe(bb: BbPluginApi, probe: PathProbe): PathProbe {
+  const checks = new Map<string, ReturnType<PathProbe>>();
+  const warned = new Set<string>();
+  return (hostId, rootPath, relativePath) => {
+    const key = `${hostId}\n${rootPath}\n${relativePath}`;
+    let check = checks.get(key);
+    if (check === undefined) {
+      check = probe(hostId, rootPath, relativePath).catch((cause: unknown) => {
+        const rootKey = `${hostId}\n${rootPath}`;
+        if (!warned.has(rootKey)) {
+          warned.add(rootKey);
+          bb.log.warn(`Cannot check files in ${rootPath} on ${hostId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+        return null;
+      });
+      checks.set(key, check);
+    }
+    return check;
+  };
 }
 
 /** A file name worth searching for; bare prose words are not. */
@@ -67,11 +114,7 @@ function toWorkspaceRelative(rootPath: string, raw: string): string | null {
   }
 }
 
-/**
- * The tree hides `.git`, `node_modules` and friends, so a path inside one is
- * something it will never draw. Offering a reveal there promises a jump that
- * cannot happen.
- */
+/** Search excludes common build folders; an explicit path may still reveal them. */
 function isHidden(relativePath: string): boolean {
   return relativePath
     .split("/")
@@ -79,18 +122,15 @@ function isHidden(relativePath: string): boolean {
 }
 
 async function statUnderRoot(
+  probe: PathProbe,
+  hostId: string,
   rootPath: string,
   relativePath: string,
 ): Promise<Resolved | null> {
   // "" is the root itself, which is a perfectly good reveal target: `~/Documents`
   // names a real folder even though nothing follows it.
-  if (isHidden(relativePath)) return null;
-  try {
-    const info = await stat(resolveUnderRoot(rootPath, relativePath));
-    return { relativePath, isDirectory: info.isDirectory(), exact: true };
-  } catch {
-    return null;
-  }
+  const info = await probe(hostId, rootPath, relativePath);
+  return info === null ? null : { relativePath, isDirectory: info.isDirectory, exact: true, ancestor: false };
 }
 
 /** The path as written, and with the workspace folder's name stripped. */
@@ -102,14 +142,16 @@ function spellings(rootPath: string, relativePath: string): string[] {
 }
 
 async function nearestAncestor(
+  probe: PathProbe,
+  hostId: string,
   rootPath: string,
   relativePath: string,
 ): Promise<Resolved | null> {
   const parts = relativePath.split("/").filter((part) => part.length > 0);
   for (let end = parts.length - 1; end > 0; end -= 1) {
     const prefix = parts.slice(0, end).join("/");
-    const found = await statUnderRoot(rootPath, prefix);
-    if (found !== null) return { ...found, exact: false };
+    const found = await statUnderRoot(probe, hostId, rootPath, prefix);
+    if (found !== null) return { ...found, exact: false, ancestor: true };
   }
   return null;
 }
@@ -119,6 +161,7 @@ async function searchByName(
   workspace: Workspace,
   relativePath: string,
 ): Promise<Resolved | null> {
+  if (relativePath.includes("/")) return null;
   const name = path.basename(relativePath);
   if (name === "" || !hasFileExtension(name)) return null;
   if (workspace.environmentId === null) return null;
@@ -145,6 +188,7 @@ async function searchByName(
     relativePath: hit.path.split(path.sep).join("/"),
     isDirectory: hit.kind === "directory",
     exact: false,
+    ancestor: false,
   };
 }
 
@@ -152,17 +196,18 @@ export async function resolveOne(
   bb: BbPluginApi,
   workspace: Workspace,
   raw: string,
+  probe: PathProbe,
 ): Promise<Resolved | null> {
   const relativePath = toWorkspaceRelative(workspace.rootPath, raw);
   if (relativePath === null) return null;
 
   const root = workspace.rootPath;
   for (const spelling of spellings(root, relativePath)) {
-    const exact = await statUnderRoot(root, spelling);
+    const exact = await statUnderRoot(probe, workspace.hostId, root, spelling);
     if (exact !== null) return exact;
   }
   for (const spelling of spellings(root, relativePath)) {
-    const ancestor = await nearestAncestor(root, spelling);
+    const ancestor = await nearestAncestor(probe, workspace.hostId, root, spelling);
     if (ancestor !== null) return ancestor;
   }
   return searchByName(bb, workspace, relativePath);
@@ -172,15 +217,17 @@ export async function resolveInWorkspace(
   bb: BbPluginApi,
   input: { threadId: string; path: string },
   getSearchRoots: SearchRootsGetter,
+  probe: PathProbe,
 ): Promise<RevealResult> {
+  probe = resilientProbe(bb, probe);
   const result = await workspaceForThread(bb, input.threadId);
   if (!result.ok) {
     return { ok: false, message: `No workspace for this thread (${result.reason})` };
   }
   const workspace = result.workspace;
 
-  const resolved = await resolveOne(bb, workspace, input.path);
-  if (resolved !== null) {
+  const resolved = await resolveOne(bb, workspace, input.path, probe);
+  if (resolved !== null && !resolved.ancestor) {
     return {
       ok: true,
       relativePath: resolved.relativePath,
@@ -198,14 +245,21 @@ export async function resolveInWorkspace(
     workspace.hostId,
     input.path,
     getSearchRoots,
+    probe,
   );
-  if (elsewhere !== null) {
+  if (elsewhere !== null && !elsewhere.ancestor) {
     return {
       ok: true,
       relativePath: elsewhere.relativePath,
       isDirectory: elsewhere.isDirectory,
       root: elsewhere.root,
     };
+  }
+  if (resolved !== null) {
+    return { ok: true, relativePath: resolved.relativePath, isDirectory: resolved.isDirectory, root: null };
+  }
+  if (elsewhere !== null) {
+    return { ok: true, relativePath: elsewhere.relativePath, isDirectory: elsewhere.isDirectory, root: elsewhere.root };
   }
   return { ok: false, message: `Not found in any project: ${input.path}` };
 }
@@ -215,7 +269,9 @@ export async function resolveInRoot(
   bb: BbPluginApi,
   input: { rootId: string; path: string },
   getSearchRoots: SearchRootsGetter,
+  probe: PathProbe,
 ): Promise<RevealResult> {
+  probe = resilientProbe(bb, probe);
   const root = resolveRoot(input.rootId);
   if (root === undefined) throw new Error("File tree root expired. Choose the folder again.");
   const workspace: Workspace = {
@@ -225,14 +281,14 @@ export async function resolveInRoot(
     rootName: path.basename(root.rootPath) || root.rootPath,
     rootId: input.rootId,
   };
-  const here = await resolveOne(bb, workspace, input.path);
-  if (here !== null) {
+  const here = await resolveOne(bb, workspace, input.path, probe);
+  if (here !== null && !here.ancestor) {
     return { ok: true, relativePath: here.relativePath, isDirectory: here.isDirectory, root: null };
   }
   // An absolute path names one specific folder; check it before fuzzy name matches.
   if (path.isAbsolute(expandHome(input.path))) {
-    const exactElsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots);
-    if (exactElsewhere !== null) {
+    const exactElsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots, probe);
+    if (exactElsewhere !== null && !exactElsewhere.ancestor) {
       return { ok: true, relativePath: exactElsewhere.relativePath, isDirectory: exactElsewhere.isDirectory, root: exactElsewhere.root };
     }
   }
@@ -240,11 +296,20 @@ export async function resolveInRoot(
     { hostId: root.hostId, rootPath: root.rootPath, rootName: workspace.rootName, rootId: input.rootId },
     ...(await candidateRoots(bb, root.rootPath, root.hostId, getSearchRoots)),
   ];
-  const named = await findByName(roots, input.path);
+  const named = input.path.includes("/") ? null : await findByName(await localIndexRoots(bb, roots), input.path);
   if (named !== null) {
-    return { ok: true, relativePath: named.relativePath, isDirectory: named.isDirectory, root: named.root };
+    const verified = await probe(named.root.hostId, named.root.rootPath, named.relativePath);
+    if (verified !== null) {
+      return { ok: true, relativePath: named.relativePath, isDirectory: verified.isDirectory, root: named.root };
+    }
   }
-  const elsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots);
+  const elsewhere = await findOutsideWorkspace(bb, root.rootPath, root.hostId, input.path, getSearchRoots, probe);
+  if (elsewhere !== null && !elsewhere.ancestor) {
+    return { ok: true, relativePath: elsewhere.relativePath, isDirectory: elsewhere.isDirectory, root: elsewhere.root };
+  }
+  if (here !== null) {
+    return { ok: true, relativePath: here.relativePath, isDirectory: here.isDirectory, root: null };
+  }
   if (elsewhere !== null) {
     return { ok: true, relativePath: elsewhere.relativePath, isDirectory: elsewhere.isDirectory, root: elsewhere.root };
   }
@@ -287,7 +352,7 @@ export async function searchFiles(
     )),
   ];
 
-  const found = await searchByQuery(roots, input.query, input.limit);
+  const found = await searchByQuery(await localIndexRoots(bb, roots), input.query, input.limit);
   return {
     hits: found
       .filter((hit) => !isHidden(hit.relativePath))
@@ -316,7 +381,7 @@ export async function searchFilesInRoot(
   const roots = [here, ...(await candidateRoots(bb, root.rootPath, root.hostId, getSearchRoots))];
   // The indexed search ranks matching names globally. A pinned explorer should
   // put its own files first when the same name exists in several projects.
-  const found = await searchByQuery(roots, input.query, 2000);
+  const found = await searchByQuery(await localIndexRoots(bb, roots), input.query, 2000);
   found.sort((a, b) =>
     Number(b.root.rootId === input.rootId) - Number(a.root.rootId === input.rootId),
   );
@@ -335,7 +400,9 @@ export async function resolvePaths(
   bb: BbPluginApi,
   input: { threadId: string; paths: readonly string[] },
   getSearchRoots: SearchRootsGetter,
+  probe: PathProbe,
 ): Promise<{ known: string[] }> {
+  probe = resilientProbe(bb, probe);
   const result = await workspaceForThread(bb, input.threadId);
   if (!result.ok) return { known: [] };
 
@@ -344,27 +411,24 @@ export async function resolvePaths(
   // A message can name dozens of paths; running every lookup at once is a
   // stat storm. A few at a time still answers the whole batch.
   const settled = await mapLimit(input.paths, 4, async (raw) => {
-    const here = await resolveOne(bb, result.workspace, raw);
-    if (here !== null) return raw;
-    const elsewhere = await findOutsideWorkspace(
-      bb,
-      result.workspace.rootPath,
-      result.workspace.hostId,
-      raw,
-      getSearchRoots,
-    );
-    return elsewhere === null ? null : raw;
+    try {
+      const here = await resolveOne(bb, result.workspace, raw, probe);
+      if (here !== null && !here.ancestor) return raw;
+      const elsewhere = await findOutsideWorkspace(
+        bb,
+        result.workspace.rootPath,
+        result.workspace.hostId,
+        raw,
+        getSearchRoots,
+        probe,
+      );
+      return elsewhere !== null && !elsewhere.ancestor ? raw : null;
+    } catch (cause) {
+      bb.log.warn(`Could not verify a chat path: ${cause instanceof Error ? cause.message : String(cause)}`);
+      return null;
+    }
   });
   return { known: settled.filter((value): value is string => value !== null) };
-}
-
-async function pathExists(absolutePath: string): Promise<boolean> {
-  try {
-    await stat(absolutePath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function absoluteUnder(rootPath: string, relativePath: string): string | null {
@@ -396,15 +460,21 @@ export async function resolveFileAnchors(
     anchors: readonly { text: string; href: string }[];
   },
   getSearchRoots: SearchRootsGetter,
+  probe: PathProbe,
 ): Promise<{ fixes: AnchorFix[] }> {
+  probe = resilientProbe(bb, probe);
   const result = await workspaceForThread(bb, input.threadId);
   if (!result.ok) return { fixes: [] };
   const workspace = result.workspace;
 
   const checks = await mapLimit(input.anchors, 4, async (anchor): Promise<AnchorFix | null> => {
-    if (await pathExists(anchor.href)) return null;
+    const existing = await bb.sdk.hosts.pathsExist({
+      hostId: workspace.hostId,
+      paths: [anchor.href],
+    });
+    if (existing.existence[anchor.href] === true) return null;
 
-    const here = await resolveOne(bb, workspace, anchor.text);
+    const here = await resolveOne(bb, workspace, anchor.text, probe);
     if (here !== null) {
       const absolutePath = absoluteUnder(workspace.rootPath, here.relativePath);
       if (absolutePath === null || absolutePath === anchor.href) return null;
@@ -423,6 +493,7 @@ export async function resolveFileAnchors(
       workspace.hostId,
       anchor.text,
       getSearchRoots,
+      probe,
     );
     if (elsewhere === null) return null;
     const absolutePath = absoluteUnder(
@@ -474,10 +545,11 @@ async function candidateRoots(
     return cached.roots;
   }
   const roots: RevealRoot[] = [];
-  const seen = new Set<string>([currentRoot]);
+  const seen = new Set<string>([`${fallbackHostId}\n${currentRoot}`]);
   const add = (rootPath: string, rootName: string, hostId: string): void => {
-    if (rootPath === "" || seen.has(rootPath)) return;
-    seen.add(rootPath);
+    const key = `${hostId}\n${rootPath}`;
+    if (rootPath === "" || seen.has(key)) return;
+    seen.add(key);
     roots.push({ hostId, rootPath, rootName, rootId: registerRoot(hostId, rootPath) });
   };
 
@@ -496,12 +568,12 @@ async function candidateRoots(
     add(configured, path.basename(configured), fallbackHostId);
     let entries;
     try {
-      entries = await readdir(configured, { withFileTypes: true });
+      entries = (await bb.sdk.hosts.directory({ hostId: fallbackHostId, path: configured })).entries;
     } catch {
       continue;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      if (entry.kind !== "directory" || entry.name.startsWith(".")) continue;
       if (SKIP_DIR_NAMES.has(entry.name)) continue;
       add(path.join(configured, entry.name), entry.name, fallbackHostId);
     }
@@ -555,7 +627,8 @@ async function findOutsideWorkspace(
   fallbackHostId: string,
   raw: string,
   getSearchRoots: SearchRootsGetter,
-): Promise<{ relativePath: string; isDirectory: boolean; root: RevealRoot } | null> {
+  probe: PathProbe,
+): Promise<{ relativePath: string; isDirectory: boolean; root: RevealRoot; ancestor: boolean } | null> {
   const roots = await candidateRoots(bb, currentRoot, fallbackHostId, getSearchRoots);
 
   // Exact matches everywhere before any nearest-ancestor guess, so a real hit
@@ -564,29 +637,34 @@ async function findOutsideWorkspace(
     const relativePath = toWorkspaceRelative(root.rootPath, raw);
     if (relativePath === null) continue;
     for (const spelling of spellings(root.rootPath, relativePath)) {
-      const exact = await statUnderRoot(root.rootPath, spelling);
+      const exact = await statUnderRoot(probe, root.hostId, root.rootPath, spelling);
       if (exact !== null) {
         return {
           relativePath: exact.relativePath,
           isDirectory: exact.isDirectory,
           root,
+          ancestor: false,
         };
       }
     }
   }
-  const named = await findByName(roots, raw);
-  if (named !== null) return named;
+  const named = raw.includes("/") ? null : await findByName(await localIndexRoots(bb, roots), raw);
+  if (named !== null) {
+    const verified = await probe(named.root.hostId, named.root.rootPath, named.relativePath);
+    if (verified !== null) return { ...named, isDirectory: verified.isDirectory, ancestor: false };
+  }
 
   for (const root of roots) {
     const relativePath = toWorkspaceRelative(root.rootPath, raw);
     if (relativePath === null) continue;
     for (const spelling of spellings(root.rootPath, relativePath)) {
-      const ancestor = await nearestAncestor(root.rootPath, spelling);
+      const ancestor = await nearestAncestor(probe, root.hostId, root.rootPath, spelling);
       if (ancestor !== null) {
         return {
           relativePath: ancestor.relativePath,
           isDirectory: ancestor.isDirectory,
           root,
+          ancestor: true,
         };
       }
     }

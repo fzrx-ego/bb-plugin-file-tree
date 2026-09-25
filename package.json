@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-file-tree",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "type": "module",
   "engines": {
     "bb": ">=0.43.4",
@@ -13,6 +13,7 @@
       "icon": "Folder"
     },
     "server": "./server.ts",
+    "host": "./host.ts",
     "app": "./app.tsx",
     "skills": []
   },

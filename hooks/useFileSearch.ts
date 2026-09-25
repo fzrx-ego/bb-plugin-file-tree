@@ -45,6 +45,7 @@ export function useFileSearch(tree: TreeModel) {
 
   useEffect(() => {
     if (rootId === null || trimmed.length < MIN_QUERY_LENGTH) {
+      requestId.current += 1;
       setHits([]);
       setIsSearching(false);
       return;
@@ -96,7 +97,7 @@ export function useFileSearch(tree: TreeModel) {
   /** Show it in the tree, then open it in the preview — both, as one action. */
   const go = useCallback(
     async (rawPath: string) => {
-      const landed = await tree.reveal(rawPath, { quiet: true });
+      const landed = await tree.reveal(rawPath);
       if (landed === null) return;
       clear();
       if (landed.isDirectory) return;

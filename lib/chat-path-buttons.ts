@@ -121,17 +121,30 @@ export type AnchorResolver = (
 export type FixedOpener = (fix: AnchorFix) => void;
 export type Reporter = (message: string) => void;
 
-/** The filesystem path a `file://` link points at, or null for anything else. */
-function anchorTargetPath(anchor: HTMLAnchorElement): string | null {
-  const href = anchor.getAttribute("href") ?? "";
-  if (!href.startsWith("file:")) return null;
+/** BB preview links expose their file target as an absolute or file: href. */
+export function filePathFromHref(href: string): string | null {
+  if (!href.startsWith("file:") && !href.startsWith("/")) return null;
   try {
-    const url = new URL(href);
+    const url = new URL(href, "file:///");
+    if (url.protocol !== "file:") return null;
     if (url.host !== "") return null;
     return decodeURIComponent(url.pathname);
   } catch {
     return null;
   }
+}
+
+function anchorTargetPath(anchor: HTMLAnchorElement): string | null {
+  return filePathFromHref(anchor.getAttribute("href") ?? "");
+}
+
+/** Use BB's rendered preview glyph as the signal, independent of link text. */
+function hasNativePreviewGlyph(anchor: HTMLAnchorElement): boolean {
+  for (const graphic of Array.from(anchor.querySelectorAll("svg, img"))) {
+    if (graphic.closest(`button[${BUTTON_ATTR}]`) === null) return true;
+  }
+  const next = anchor.nextElementSibling;
+  return next !== null && (next.matches("svg, img") || next.querySelector("svg, img") !== null);
 }
 
 function anchorKey(text: string, href: string): string {
@@ -293,9 +306,14 @@ export function mountChatPathButtons(
     for (const code of chatQuery<Element>("code, a")) {
       // A `<code>` inside an `<a>` matches twice; let the inner one win so the
       // path gets one button, not two.
-      if (code.querySelector("code, a") !== null) continue;
+      const previewPath = code instanceof HTMLAnchorElement && hasNativePreviewGlyph(code)
+        ? anchorTargetPath(code)
+        : null;
+      if (previewPath === null && code.querySelector("code, a") !== null) continue;
+      if (!(code instanceof HTMLAnchorElement) && code.closest("a") !== null &&
+        hasNativePreviewGlyph(code.closest("a") as HTMLAnchorElement)) continue;
       codes += 1;
-      const path = candidateOf(code);
+      const path = previewPath ?? candidateOf(code);
       if (path === null) {
         code.querySelector(`button[${BUTTON_ATTR}]`)?.remove();
         continue;
@@ -322,7 +340,9 @@ export function mountChatPathButtons(
     }
     if (sweepAgain) {
       sweepAgain = false;
-      sweepTimer = window.setTimeout(sweep, 250);
+      // During streaming, coalesce message mutations into at most one full
+      // follow-up scan per 750 ms instead of rescanning every token burst.
+      sweepTimer = window.setTimeout(sweep, 750);
       return;
     }
     sweepQueued = false;
