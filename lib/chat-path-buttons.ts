@@ -405,7 +405,7 @@ export function mountChatPathButtons(
     const path = button.dataset[PATH_ATTR];
     if (path === undefined || path === "") return;
     writeStoredOpen(true);
-    requestReveal(path);
+    requestReveal(path, threadId);
   };
 
   /**
@@ -427,7 +427,7 @@ export function mountChatPathButtons(
     writeStoredOpen(true);
     if (isDirectory) {
       // A folder has no preview; showing it in the tree is the whole action.
-      requestReveal(textOf(anchor));
+      requestReveal(textOf(anchor), threadId);
       return;
     }
     openFixed({

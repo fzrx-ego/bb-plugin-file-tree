@@ -43,6 +43,14 @@ export const workspaceSchema = z.object({
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 
+export const rootChoiceSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  projectId: z.string().nullable(),
+  workspace: workspaceSchema,
+});
+export type RootChoice = z.infer<typeof rootChoiceSchema>;
+
 export const workspaceResultSchema = z.discriminatedUnion("ok", [
   z.object({
     ok: z.literal(true),
@@ -107,6 +115,21 @@ export const anchorFixSchema = z.object({
 export type AnchorFix = z.infer<typeof anchorFixSchema>;
 
 export const rpcContract = defineRpcContract({
+  listRootChoices: {
+    input: z.object({
+      currentThreadId: z.string().min(1).nullable(),
+      pinnedThreadId: z.string().min(1).nullable(),
+    }).strict(),
+    output: z.object({ choices: z.array(rootChoiceSchema) }),
+  },
+  resolveInRoot: {
+    input: z.object({ rootId: z.string().min(1), path: z.string().trim().min(1).max(4096) }).strict(),
+    output: revealResultSchema,
+  },
+  searchFilesInRoot: {
+    input: z.object({ rootId: z.string().min(1), query: z.string().trim().min(1).max(1024), limit: z.number().int().min(1).max(50) }).strict(),
+    output: z.object({ hits: z.array(searchHitSchema) }),
+  },
   workspaceForThread: {
     input: z.object({ threadId: z.string().min(1) }).strict(),
     output: workspaceResultSchema,

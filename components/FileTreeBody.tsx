@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { useBbNavigate, useComposer, useRpc } from "@get-bb/plugin-sdk/app";
+import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useBbContext, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Icon } from "@/components/ui/icon";
@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
 import { openWorkspaceFile } from "@/lib/open-preview";
+import { getChatTargets, requestAddToChat, subscribeChatTargets, type ChatTarget } from "@/lib/chat-draft-bus";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
 import type { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
 
@@ -28,6 +29,17 @@ function directoryOf(entry: TreeEntry): string {
   if (entry.kind === "directory") return entry.relativePath;
   const slash = entry.relativePath.lastIndexOf("/");
   return slash === -1 ? "" : entry.relativePath.slice(0, slash);
+}
+
+function targetLabel(target: ChatTarget, activeThreadId: string | null): string {
+  switch (target.scope.kind) {
+    case "thread": return target.scope.threadId === activeThreadId
+      ? "main thread"
+      : `thread ${target.scope.threadId.slice(-6)}`;
+    case "side-chat": return `side chat ${target.scope.tabId.slice(-6)}`;
+    case "queued-message": return `queued message ${target.scope.queuedMessageId.slice(-6)}`;
+    case "new-thread": return "new thread";
+  }
 }
 
 async function createAndOpenBlankMd(args: {
@@ -64,30 +76,22 @@ async function createAndOpenBlankMd(args: {
   }
 }
 
-function reasonText(reason: "no_thread" | "no_environment" | "no_checkout"): string {
-  switch (reason) {
-    case "no_thread":
-      return "Open a thread to see its workspace.";
-    case "no_environment":
-      return "This thread has no workspace.";
-    case "no_checkout":
-      return "The workspace folder is not on disk yet.";
-  }
-}
-
 function TreeRow({
   entry,
   depth,
   workspace,
   tree,
+  chatTargets,
+  activeThreadId,
 }: {
   entry: TreeEntry;
   depth: number;
   workspace: Workspace;
   tree: TreeModel;
+  chatTargets: readonly ChatTarget[];
+  activeThreadId: string | null;
 }) {
   const navigate = useBbNavigate();
-  const composer = useComposer();
   const rpc = useRpc<typeof rpcContract>();
   const isDir = entry.kind === "directory";
   const isOpen = isDir && tree.expanded.has(entry.relativePath);
@@ -117,18 +121,20 @@ function TreeRow({
       },
     );
     if (!opened) {
-      toast.error("Could not open the default preview for this file.");
+      toast.error("Preview unavailable here. Use Open in external editor from the file menu.");
     }
   };
 
-  /** Append to the draft rather than replacing it, so several picks stack. */
-  const addToChat = () => {
-    composer.updateText((current) =>
-      current.trimEnd() === ""
-        ? entry.relativePath
-        : `${current.trimEnd()} ${entry.relativePath}`,
-    );
-    composer.focus();
+  const openExternal = () => {
+    if (!openWorkspaceFile(navigate, workspace, entry.relativePath, undefined, "external")) {
+      toast.error("Could not open the file in an external editor.");
+    }
+  };
+
+  const addToChat = (targetKey: string) => {
+    if (!requestAddToChat(targetKey, absolutePathOf(workspace, entry.relativePath))) {
+      toast.error("That chat draft is no longer open.");
+    }
   };
 
   const osPath = {
@@ -219,10 +225,18 @@ function TreeRow({
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-56">
-          <ContextMenuItem onSelect={addToChat}>
-            <Icon name="MessageSquarePlus" className="size-4" />
-            Add to chat
-          </ContextMenuItem>
+          {chatTargets.map((target) => (
+            <ContextMenuItem key={target.key} onSelect={() => addToChat(target.key)}>
+              <Icon name="MessageSquarePlus" className="size-4" />
+              {chatTargets.length === 1 ? "Add to chat" : `Add to ${targetLabel(target, activeThreadId)}`}
+            </ContextMenuItem>
+          ))}
+          {!isDir ? (
+            <ContextMenuItem onSelect={openExternal}>
+              <Icon name="FolderOpen" className="size-4" />
+              Open in external editor
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuItem onSelect={createBlankMd}>
             <Icon name="FileText" className="size-4" />
             Create blank .md
@@ -291,6 +305,8 @@ function TreeRow({
               depth={depth + 1}
               workspace={workspace}
               tree={tree}
+              chatTargets={chatTargets}
+              activeThreadId={activeThreadId}
             />
           ))
         : null}
@@ -301,30 +317,20 @@ function TreeRow({
 export function FileTreeBody({ tree }: { tree: TreeModel }) {
   const navigate = useBbNavigate();
   const rpc = useRpc<typeof rpcContract>();
+  const { threadId } = useBbContext();
+  const chatTargets = useSyncExternalStore(subscribeChatTargets, getChatTargets, getChatTargets);
 
-  if (tree.settingsLoading || tree.workspace === null) {
+  if (tree.settingsLoading) {
     return (
       <p className="px-2 py-3 text-[11px] text-muted-foreground">Loading…</p>
     );
   }
   const workspace = tree.active;
   if (workspace === null) {
-    if (tree.workspace.ok) {
-      return (
-        <p className="px-2 py-3 text-[11px] text-muted-foreground">Loading…</p>
-      );
-    }
-    // The root row carries the reload action, and it is not on screen here, so
-    // the message itself has to offer the retry.
     return (
-      <button
-        type="button"
-        className="px-2 py-3 text-left text-[11px] text-muted-foreground"
-        onClick={() => void tree.reload()}
-        title="Click to look again"
-      >
-        {reasonText(tree.workspace.reason)}
-      </button>
+      <p className="px-2 py-3 text-[11px] text-muted-foreground">
+        Choose a folder above.
+      </p>
     );
   }
 
@@ -349,7 +355,7 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
             onClick={() => void tree.reload()}
             title={
               tree.isRerooted
-                ? `${workspace.rootPath} — click to go back to this thread's workspace`
+                ? `${workspace.rootPath} — click to return to the pinned folder`
                 : workspace.rootPath
             }
           >
@@ -378,6 +384,8 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
               depth={0}
               workspace={workspace}
               tree={tree}
+              chatTargets={chatTargets}
+              activeThreadId={threadId}
             />
           ))
         : null}

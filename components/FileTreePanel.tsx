@@ -5,16 +5,15 @@ import {
 } from "@/components/FileTreeSearch";
 import { useFileSearch } from "@/hooks/useFileSearch";
 import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
+import type { Workspace } from "../contract";
 
 export function FileTreePanel({
-  threadId,
-  projectId = null,
+  root,
 }: {
-  threadId: string | null;
-  projectId?: string | null;
+  root: Workspace | null;
 }) {
-  const tree = useWorkspaceTree(threadId, projectId);
-  const search = useFileSearch(threadId, tree);
+  const tree = useWorkspaceTree(root);
+  const search = useFileSearch(tree);
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
       <FileTreeSearchBox search={search} />
