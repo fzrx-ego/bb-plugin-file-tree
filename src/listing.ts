@@ -1,18 +1,22 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { TreeEntry } from "../contract";
-import { shouldSkip, sortEntries } from "./ignore";
-import { resolveUnderRoot, toRelativePath } from "./paths";
+import { resolveUnderRoot } from "./paths";
 import { resolveRoot } from "./roots";
 
-/**
- * Expanding the same folder while a chat burst remounts the panel should not
- * list it again. Create and delete drop the cache for that root; anything
- * changed outside the plugin shows up once this expires.
- */
+/** Short cache avoids repeated host calls while the panel remounts. */
 const LIST_TTL_MS = 8_000;
+const MAX_CACHED_DIRECTORIES = 500;
 const listCache = new Map<string, { at: number; entries: TreeEntry[] }>();
+let generation = 0;
+
+export type HostDirectoryCall = (input: {
+  hostId: string;
+  rootPath: string;
+  relativePath: string;
+  showSkipped: boolean;
+}) => Promise<{ entries: TreeEntry[] }>;
 
 export function invalidateListings(rootId?: string): void {
+  generation += 1;
   if (rootId === undefined) {
     listCache.clear();
     return;
@@ -24,44 +28,31 @@ export function invalidateListings(rootId?: string): void {
 }
 
 export async function listDir(
-  bb: BbPluginApi,
-  input: {
-    rootId: string;
-    relativePath: string;
-    showSkipped: boolean;
-  },
+  input: { rootId: string; relativePath: string; showSkipped: boolean },
+  callHost: HostDirectoryCall,
 ): Promise<{ entries: TreeEntry[] }> {
   const root = resolveRoot(input.rootId);
   if (root === undefined) {
     throw new Error("This file tree panel is out of date — reopen it and try again.");
   }
+  resolveUnderRoot(root.rootPath, input.relativePath);
   const cacheKey = `${input.rootId}\n${input.relativePath}\n${input.showSkipped}`;
   const cached = listCache.get(cacheKey);
   if (cached !== undefined && Date.now() - cached.at < LIST_TTL_MS) {
+    listCache.delete(cacheKey);
+    listCache.set(cacheKey, cached);
     return { entries: cached.entries };
   }
-  const absolute = resolveUnderRoot(root.rootPath, input.relativePath);
-  const listing = await bb.sdk.hosts.directory({
-    hostId: root.hostId,
-    path: absolute,
-  });
-  const mapped: TreeEntry[] = [];
-  for (const entry of listing.entries) {
-    let relativePath: string;
-    try {
-      relativePath = toRelativePath(root.rootPath, entry.path);
-    } catch {
-      continue;
+  listCache.delete(cacheKey);
+  const requestGeneration = generation;
+  const result = await callHost({ ...root, relativePath: input.relativePath, showSkipped: input.showSkipped });
+  if (requestGeneration === generation) {
+    listCache.set(cacheKey, { at: Date.now(), entries: result.entries });
+    while (listCache.size > MAX_CACHED_DIRECTORIES) {
+      const oldest = listCache.keys().next().value;
+      if (oldest === undefined) break;
+      listCache.delete(oldest);
     }
-    const next: TreeEntry = {
-      name: entry.name,
-      relativePath,
-      kind: entry.kind,
-    };
-    if (shouldSkip(next, input.showSkipped)) continue;
-    mapped.push(next);
   }
-  const entries = sortEntries(mapped);
-  listCache.set(cacheKey, { at: Date.now(), entries });
-  return { entries };
+  return result;
 }

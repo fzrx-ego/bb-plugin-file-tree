@@ -22,6 +22,8 @@
   },
   "include": [
     "server.ts",
+    "host.ts",
+    "host-contract.ts",
     "app.tsx",
     "contract.ts",
     "src",
