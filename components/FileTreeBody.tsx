@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
 import { openWorkspaceFile } from "@/lib/open-preview";
+import { surfaceNavigation } from "@/lib/surface-navigation";
 import { getChatTargets, requestAddToChat, subscribeChatTargets, type ChatTarget } from "@/lib/chat-draft-bus";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
 import type { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
@@ -91,7 +92,8 @@ function TreeRow({
   chatTargets: readonly ChatTarget[];
   activeThreadId: string | null;
 }) {
-  const navigate = useBbNavigate();
+  const overlayNavigate = useBbNavigate();
+  const { threadId } = useBbContext();
   const rpc = useRpc<typeof rpcContract>();
   const isDir = entry.kind === "directory";
   const isOpen = isDir && tree.expanded.has(entry.relativePath);
@@ -112,21 +114,22 @@ function TreeRow({
       tree.toggleDir(entry.relativePath);
       return;
     }
+    const navigation = surfaceNavigation(threadId);
     const opened = openWorkspaceFile(
-      navigate,
+      navigation,
       workspace,
       entry.relativePath,
       (message) => {
         void rpc.call("clientLog", { message }).catch(() => undefined);
       },
     );
-    if (!opened) {
-      toast.error("Preview unavailable here. Use Open in external editor from the file menu.");
-    }
+    if (!opened) toast.error(navigation === null
+      ? "Open a thread or New Thread page to preview files."
+      : "Could not open the file preview.");
   };
 
   const openExternal = () => {
-    if (!openWorkspaceFile(navigate, workspace, entry.relativePath, undefined, "external")) {
+    if (!openWorkspaceFile(overlayNavigate, workspace, entry.relativePath, undefined, "external")) {
       toast.error("Could not open the file in an external editor.");
     }
   };
@@ -168,7 +171,7 @@ function TreeRow({
   const createBlankMd = () => {
     void createAndOpenBlankMd({
       rpc,
-      navigate,
+      navigate: overlayNavigate,
       workspace,
       directoryRelativePath: directoryOf(entry),
       showCreated: tree.showCreated,
@@ -315,7 +318,7 @@ function TreeRow({
 }
 
 export function FileTreeBody({ tree }: { tree: TreeModel }) {
-  const navigate = useBbNavigate();
+  const overlayNavigate = useBbNavigate();
   const rpc = useRpc<typeof rpcContract>();
   const { threadId } = useBbContext();
   const chatTargets = useSyncExternalStore(subscribeChatTargets, getChatTargets, getChatTargets);
@@ -337,7 +340,7 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
   const createBlankMdInRoot = () => {
     void createAndOpenBlankMd({
       rpc,
-      navigate,
+      navigate: overlayNavigate,
       workspace,
       directoryRelativePath: "",
       showCreated: tree.showCreated,
