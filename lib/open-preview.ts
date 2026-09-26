@@ -15,12 +15,16 @@ type Navigate = ReturnType<typeof useBbNavigate>;
  * workspace target; every other root goes to the host by absolute path.
  */
 export function openWorkspaceFile(
-  navigate: Navigate,
+  navigate: Navigate | null,
   workspace: Workspace,
   relativePath: string,
   report: (message: string) => void = () => undefined,
   via: "preview" | "external" = "preview",
 ): boolean {
+  if (navigate === null) {
+    report("open unavailable: this BB surface has no file preview navigation");
+    return false;
+  }
   const root = workspace.rootPath.replace(/\/+$/u, "");
   const absolutePath = relativePath === "" ? root : `${root}/${relativePath}`;
   const environmentId = workspace.environmentId;

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { mountChatPathButtons } from "@/lib/chat-path-buttons";
+import { registerSurfaceNavigation } from "@/lib/surface-navigation";
 import type { rpcContract } from "../contract";
 
 /**
@@ -22,6 +23,7 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const unregisterNavigation = registerSurfaceNavigation(threadId, navigate);
     mountChatPathButtons(
       controller.signal,
       threadId,
@@ -48,7 +50,10 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
         void rpc.call("clientLog", { message }).catch(() => undefined);
       },
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      unregisterNavigation();
+    };
   }, [navigate, rpc, threadId]);
 
   return null;

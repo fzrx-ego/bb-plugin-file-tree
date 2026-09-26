@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-file-tree",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "type": "module",
   "engines": {
     "bb": ">=0.43.4",

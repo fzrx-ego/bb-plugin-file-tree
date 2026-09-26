@@ -5,9 +5,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import { useBbContext, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { openWorkspaceFile } from "@/lib/open-preview";
+import { surfaceNavigation } from "@/lib/surface-navigation";
 import { subscribeSearchFocus } from "@/lib/search-focus-bus";
 import type { rpcContract, SearchHit } from "../contract";
 import type { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
@@ -30,7 +31,7 @@ type TreeModel = ReturnType<typeof useWorkspaceTree>;
  */
 export function useFileSearch(tree: TreeModel) {
   const rpc = useRpc<typeof rpcContract>();
-  const navigate = useBbNavigate();
+  const { threadId } = useBbContext();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -101,14 +102,17 @@ export function useFileSearch(tree: TreeModel) {
       if (landed === null) return;
       clear();
       if (landed.isDirectory) return;
+      const navigation = surfaceNavigation(threadId);
       const opened = openWorkspaceFile(
-        navigate,
+        navigation,
         landed.workspace,
         landed.relativePath,
       );
-      if (!opened) toast.error("Could not open the default preview for this file.");
+      if (!opened) toast.error(navigation === null
+        ? "Open a thread or New Thread page to preview files."
+        : "Could not open the file preview.");
     },
-    [clear, navigate, tree],
+    [clear, threadId, tree],
   );
 
   const select = useCallback(
