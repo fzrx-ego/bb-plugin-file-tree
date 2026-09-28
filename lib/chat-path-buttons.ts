@@ -121,6 +121,29 @@ export type AnchorResolver = (
 export type FixedOpener = (fix: AnchorFix) => void;
 export type Reporter = (message: string) => void;
 
+/**
+ * Path the reveal button names.
+ *
+ * A native preview glyph means BB already chose an href. When that href is a
+ * file that is not on disk, `resolveFileAnchors` has the file the link text
+ * names. The button uses that file: the dead href never validates, so the
+ * glyph alone leaves the link with no tree icon.
+ *
+ * `fixAbsolutePath` is `undefined` until that lookup returns, and `null` when
+ * BB's href stands or nothing matched the text.
+ */
+export function chatRevealPath(args: {
+  hrefPath: string | null;
+  textPath: string | null;
+  fixAbsolutePath: string | null | undefined;
+}): string | null {
+  if (args.fixAbsolutePath !== undefined && args.fixAbsolutePath !== null && args.fixAbsolutePath !== "") {
+    return args.fixAbsolutePath;
+  }
+  if (args.hrefPath !== null) return args.hrefPath;
+  return args.textPath;
+}
+
 /** BB preview links expose their file target as an absolute or file: href. */
 export function filePathFromHref(href: string): string | null {
   if (!href.startsWith("file:") && !href.startsWith("/")) return null;
@@ -313,12 +336,26 @@ export function mountChatPathButtons(
       if (!(code instanceof HTMLAnchorElement) && code.closest("a") !== null &&
         hasNativePreviewGlyph(code.closest("a") as HTMLAnchorElement)) continue;
       codes += 1;
-      const path = previewPath ?? candidateOf(code);
+      const hrefPath = code instanceof HTMLAnchorElement ? anchorTargetPath(code) : null;
+      const stored = hrefPath !== null
+        ? anchorFixes.get(anchorKey(textOf(code), hrefPath))
+        : undefined;
+      const path = chatRevealPath({
+        hrefPath: previewPath,
+        textPath: candidateOf(code),
+        fixAbsolutePath: stored === undefined || stored === null ? stored : stored.absolutePath,
+      });
       if (path === null) {
         code.querySelector(`button[${BUTTON_ATTR}]`)?.remove();
         continue;
       }
       candidates += 1;
+      // The repaired path is a file resolveFileAnchors already found.
+      if (stored !== undefined && stored !== null) {
+        wanted += 1;
+        ensureButton(code, path);
+        continue;
+      }
       const verdict = known.get(path);
       if (verdict === true) {
         wanted += 1;
