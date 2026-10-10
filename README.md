@@ -14,8 +14,8 @@ Or search **File Tree** in BB Community.
 
 - Type in the search box above the tree to find a file by name, by part of its path, or by a path you paste. Arrow keys move, Enter selects the file in the tree and opens its preview on a thread or New Thread page; the tree re-roots if the file lives in another project. Enter with nothing in the list falls back to resolving the text as written, which also covers folders.
 - Choose the pinned folder from the selector above search. Project sources and the current thread workspace are listed; the choice survives BB restarts. A search hit or chat path can temporarily show another folder. Click its root name to return to the pinned folder.
-- Use the File Tree button in the sidebar footer to show or hide the tree on any BB page. The thread header and New thread composer also provide a button.
-- In BB's framed desktop window the tree is a card beside the thread, aligned to BB's own cards, and leaves the top-right window controls free.
+- Use the File Tree button in the window's top-right corner, next to BB's panel button, or in the sidebar footer to show or hide the tree on any BB page. Without BB's framed title bar (narrow window, web) the button sits in the thread header. The New thread composer also provides a button.
+- In BB's framed desktop window the tree is a card beside the thread, aligned to BB's own cards.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
 - Files show Seti-style type icons (markdown, JSON, git, `.env`, README, TypeScript, …), as in Cursor. Folders keep only the chevron.

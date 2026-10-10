@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-file-tree",
-  "version": "0.19.5",
+  "version": "0.19.6",
   "type": "module",
   "engines": {
     "bb": ">=0.43.4",
@@ -10,7 +10,7 @@
     "name": "File Tree",
     "description": "Shows a pinned file tree across BB threads. Search, preview, add paths to chat, or reveal files in Finder.",
     "branding": {
-      "icon": "Folder"
+      "icon": "./icons/folder-tree.svg"
     },
     "server": "./server.ts",
     "host": "./host.ts",
