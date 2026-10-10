@@ -119,7 +119,7 @@ export async function listRootChoices(
       if (treeRoot === undefined) continue;
       const resolved = await workspaceForProject(bb, project.id, treeRoot);
       if (resolved.ok) {
-        choices.push({ id: `personal:${project.id}`, label: `${project.name} · ${resolved.workspace.rootPath}`, projectId: project.id, workspace: resolved.workspace });
+        choices.push({ id: `personal:${project.id}`, label: project.name, projectId: project.id, workspace: resolved.workspace });
       }
       continue;
     }
@@ -127,7 +127,7 @@ export async function listRootChoices(
       const rootPath = source.path;
       choices.push({
         id: `source:${source.id}`,
-        label: `${project.name} · ${rootPath}`,
+        label: project.name,
         projectId: project.id,
         workspace: {
           environmentId: null,
@@ -147,7 +147,7 @@ export async function listRootChoices(
       if (resolved.ok) {
         choices.unshift({
           id: `thread:${threadId}`,
-          label: `Thread workspace · ${resolved.workspace.rootPath}`,
+          label: "Thread workspace",
           projectId: null,
           workspace: resolved.workspace,
         });

@@ -45,6 +45,7 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 
 export const rootChoiceSchema = z.object({
   id: z.string(),
+  /** Project name, or "Thread workspace"; the path is `workspace.rootPath`. */
   label: z.string(),
   projectId: z.string().nullable(),
   workspace: workspaceSchema,

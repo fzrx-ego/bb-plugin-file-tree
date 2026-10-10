@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/icon";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { FileTreePanel } from "@/components/FileTreePanel";
 import { RailResizeHandle } from "@/components/RailResizeHandle";
+import { RootPicker } from "@/components/RootPicker";
 import { TitleBarFileTreeToggle } from "@/components/TitleBarFileTreeToggle";
 import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
 import { usePortalScopeProps } from "@/lib/portal-scope";
@@ -145,22 +146,15 @@ export function GlobalFileTreeRail() {
         style={framed ? { borderColor: "var(--border-seam)" } : undefined}
       >
         <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
-          <div className="relative flex min-w-0 flex-1">
-            <select
-              aria-label="File tree folder"
-              title="Pinned folder — changing threads does not change this tree"
-              value={selectedId ?? ""}
-              onChange={(event) => {
-                const id = event.target.value;
+          <div className="flex min-w-0 flex-1">
+            <RootPicker
+              choices={choices}
+              selectedId={selectedId}
+              onSelect={(id) => {
                 setSelectedId(id);
                 writePinnedRoot(id);
               }}
-              className="h-7 min-w-0 max-w-full cursor-default appearance-none truncate rounded-md bg-transparent pl-2 pr-6 text-sm font-medium text-sidebar-foreground outline-none [field-sizing:content] hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {selectedId === null || chosen === undefined ? <option value={selectedId ?? ""}>Choose a folder</option> : null}
-              {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-            </select>
-            <Icon name="ChevronDown" className="pointer-events-none absolute right-1.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            />
           </div>
           <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
             aria-label="Refresh folder list"
