@@ -56,3 +56,37 @@ export function openWorkspaceFile(
     return false;
   }
 }
+
+const PREVIEW_ONCE_KEY = "md-editor:preview-once";
+const PREVIEW_ONCE_EVENT = "md-editor:preview-once";
+
+/** Files Markdown PRO (md-editor) opens in its editor by default. */
+export function isMarkdownFile(name: string): boolean {
+  return /\.(md|mdx|markdown)$/iu.test(name);
+}
+
+/**
+ * Open a file in bb's standard preview even when Markdown PRO would take it.
+ * Markdown PRO has no per-open opener choice in the SDK, so the request goes
+ * through a one-shot flag it reads: a localStorage record for a tab that is
+ * about to mount, and a window event for a tab that is already open. The flag
+ * lists the relative and absolute spelling of the path because the opener
+ * receives whichever one the target used.
+ */
+export function openStandardPreview(
+  navigate: Navigate | null,
+  workspace: Workspace,
+  relativePath: string,
+  report: (message: string) => void = () => undefined,
+): boolean {
+  const root = workspace.rootPath.replace(/\/+$/u, "");
+  const paths = [relativePath, `${root}/${relativePath}`];
+  try {
+    globalThis.localStorage?.setItem(PREVIEW_ONCE_KEY, JSON.stringify({ paths, ts: Date.now() }));
+  } catch {
+    // Storage unavailable: the file opens in the default viewer.
+  }
+  const opened = openWorkspaceFile(navigate, workspace, relativePath, report);
+  window.dispatchEvent(new CustomEvent(PREVIEW_ONCE_EVENT, { detail: { paths } }));
+  return opened;
+}

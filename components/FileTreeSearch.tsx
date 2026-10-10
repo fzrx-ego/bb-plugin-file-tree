@@ -15,8 +15,9 @@ function folderOf(relativePath: string): string {
 
 export function FileTreeSearchBox({ search }: { search: SearchModel }) {
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-sidebar-border px-1.5 py-1">
-      <Icon name="Search" className="size-3 shrink-0 text-muted-foreground" />
+    // Same pill as the chat sidebar's search, so the two fields read as one family.
+    <div className="mx-2 mb-1 mt-2 flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-sidebar-accent/70 pl-2.5 pr-1.5">
+      <Icon name="Search" className="size-3.5 shrink-0 text-muted-foreground" />
       <input
         ref={search.inputRef}
         type="text"
@@ -27,16 +28,16 @@ export function FileTreeSearchBox({ search }: { search: SearchModel }) {
         aria-label="Find a file"
         autoComplete="off"
         spellCheck={false}
-        className="min-w-0 flex-1 bg-transparent py-0.5 text-[11px] leading-5 text-sidebar-foreground outline-none placeholder:text-muted-foreground"
+        className="min-w-0 flex-1 bg-transparent text-xs leading-5 text-sidebar-foreground outline-none placeholder:text-muted-foreground"
       />
       {search.isActive ? (
         <button
           type="button"
           onClick={search.clear}
           aria-label="Clear search"
-          className="flex size-4 shrink-0 items-center justify-center rounded-[3px] text-muted-foreground hover:bg-state-hover"
+          className="grid size-[18px] shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
         >
-          <Icon name="X" className="size-2.5" />
+          <Icon name="X" className="size-3" />
         </button>
       ) : null}
     </div>
@@ -72,14 +73,14 @@ function ResultRow({
       onMouseEnter={onHover}
       title={`${hit.rootName}/${hit.relativePath}`}
       className={cn(
-        "flex w-full min-w-0 items-start gap-1 rounded-[3px] px-1.5 py-0.5 text-left",
+        "flex w-full min-w-0 items-start gap-1.5 rounded-md px-1.5 py-1 text-left",
         "hover:bg-state-hover",
         isActive && "bg-state-active",
       )}
     >
       <FileTypeIcon name={hit.name} className="mt-0.5 size-3" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[11px] leading-4">{hit.name}</span>
+        <span className="block truncate text-xs leading-4">{hit.name}</span>
         <span className="block truncate text-[10px] leading-4 text-muted-foreground">
           {folder === "" ? hit.rootName : `${hit.rootName}/${folder}`}
         </span>
@@ -102,7 +103,7 @@ export function FileTreeSearchResults({ search }: { search: SearchModel }) {
     );
   }
   return (
-    <div className="min-h-0 flex-1 overflow-auto py-1">
+    <div className="min-h-0 flex-1 overflow-auto px-1.5 py-1">
       {search.hits.map((hit, index) => (
         <ResultRow
           key={hit.absolutePath}

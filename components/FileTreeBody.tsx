@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
-import { openWorkspaceFile } from "@/lib/open-preview";
+import { isMarkdownFile, openStandardPreview, openWorkspaceFile } from "@/lib/open-preview";
 import { surfaceNavigation } from "@/lib/surface-navigation";
 import { getChatTargets, requestAddToChat, subscribeChatTargets, type ChatTarget } from "@/lib/chat-draft-bus";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
@@ -128,6 +128,18 @@ function TreeRow({
       : "Could not open the file preview.");
   };
 
+  const openInPreview = () => {
+    const opened = openStandardPreview(
+      surfaceNavigation(threadId),
+      workspace,
+      entry.relativePath,
+      (message) => {
+        void rpc.call("clientLog", { message }).catch(() => undefined);
+      },
+    );
+    if (!opened) toast.error("Open a thread or New Thread page to preview files.");
+  };
+
   const openExternal = () => {
     if (!openWorkspaceFile(overlayNavigate, workspace, entry.relativePath, undefined, "external")) {
       toast.error("Could not open the file in an external editor.");
@@ -207,7 +219,7 @@ function TreeRow({
             onClick={onActivate}
             title={entry.relativePath}
             className={cn(
-              "flex w-full min-w-0 items-center gap-0.5 rounded-[3px] py-px pr-1 text-left text-[11px] leading-5",
+              "flex w-full min-w-0 items-center gap-1 rounded-md py-0.5 pr-1 text-left text-xs leading-5",
               "hover:bg-state-hover",
               isSelected && "bg-state-active font-medium",
             )}
@@ -234,6 +246,12 @@ function TreeRow({
               {chatTargets.length === 1 ? "Add to chat" : `Add to ${targetLabel(target, activeThreadId)}`}
             </ContextMenuItem>
           ))}
+          {!isDir && isMarkdownFile(entry.name) ? (
+            <ContextMenuItem onSelect={openInPreview}>
+              <Icon name="FileText" className="size-4" />
+              Open in preview
+            </ContextMenuItem>
+          ) : null}
           {!isDir ? (
             <ContextMenuItem onSelect={openExternal}>
               <Icon name="FolderOpen" className="size-4" />
@@ -349,7 +367,7 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
 
   const root = tree.dirs[""];
   return (
-    <div className="min-h-0 flex-1 overflow-auto py-1">
+    <div className="min-h-0 flex-1 overflow-auto px-1.5 py-1">
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <button

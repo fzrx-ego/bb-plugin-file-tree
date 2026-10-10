@@ -10,6 +10,8 @@ import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { RAIL_EVENT, initializeRailOpen, writeStoredOpen } from "@/lib/rail-state";
 import { useRailWidthPx } from "@/lib/rail-width";
+import { cn } from "@/lib/utils";
+import { useWindowFrame } from "@/lib/window-frame";
 import type { RootChoice, rpcContract } from "../contract";
 
 const ROOT_STORAGE_KEY = "bb-plugin-file-tree:pinned-root";
@@ -40,6 +42,7 @@ export function GlobalFileTreeRail() {
   const { values, isLoading: settingsLoading } = useSettings();
   const compact = useIsCompactViewport();
   const railWidthPx = useRailWidthPx();
+  const frame = useWindowFrame();
   const portalScopeProps = usePortalScopeProps();
   const insetHolderId = useRef(`file-tree:window:${Math.random().toString(36).slice(2)}`).current;
   const initialized = useRef(false);
@@ -108,45 +111,68 @@ export function GlobalFileTreeRail() {
   }, [compact, insetHolderId, railOpen]);
 
   if (!ready) return null;
+  // In BB's framed window the rail is a card on the window backdrop, like the
+  // content card beside it, and leaves the chrome row to BB's own controls.
+  const framed = frame !== null && !compact;
   return createPortal(
     <aside
       {...portalScopeProps}
-      className="fixed bottom-0 right-0 top-0 z-40 flex flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground"
-      style={{ display: railOpen ? "flex" : "none", width: compact ? "100vw" : `${railWidthPx}px` }}
+      className="fixed bottom-0 right-0 top-0 z-40 flex-col text-sidebar-foreground"
+      style={{
+        display: railOpen ? "flex" : "none",
+        width: compact ? "100vw" : framed ? `calc(${railWidthPx}px + ${frame.lip})` : `${railWidthPx}px`,
+        ...(framed
+          ? {
+            paddingTop: frame.top,
+            paddingRight: frame.lip,
+            paddingBottom: frame.lip,
+            backgroundColor: "var(--sidebar)",
+            backgroundImage: "linear-gradient(var(--surface-recessed), var(--surface-recessed))",
+          }
+          : {}),
+      }}
       aria-label="File tree"
     >
       {compact ? null : <RailResizeHandle />}
-      <div className="flex h-[48px] shrink-0 items-center justify-between border-b border-sidebar-border pl-3 pr-1">
-        <span className="truncate text-sm font-medium text-muted-foreground">Files</span>
-        <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0"
-          aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
-          <Icon name="FolderTree" className="size-4" />
-        </Button>
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col bg-sidebar",
+          framed ? "overflow-clip rounded-xl border" : "border-l border-sidebar-border",
+        )}
+        style={framed ? { borderColor: "var(--border-seam)" } : undefined}
+      >
+        <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
+          <div className="relative flex min-w-0 flex-1">
+            <select
+              aria-label="File tree folder"
+              title="Pinned folder — changing threads does not change this tree"
+              value={selectedId ?? ""}
+              onChange={(event) => {
+                const id = event.target.value;
+                setSelectedId(id);
+                writePinnedRoot(id);
+              }}
+              className="h-7 min-w-0 max-w-full cursor-default appearance-none truncate rounded-md bg-transparent pl-2 pr-6 text-sm font-medium text-sidebar-foreground outline-none [field-sizing:content] hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              {selectedId === null || chosen === undefined ? <option value={selectedId ?? ""}>Choose a folder</option> : null}
+              {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+            </select>
+            <Icon name="ChevronDown" className="pointer-events-none absolute right-1.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          </div>
+          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground"
+            aria-label="Refresh folder list"
+            onClick={() => setRefreshCount((count) => count + 1)}>
+            <Icon name="RotateCcw" className="size-3.5" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground"
+            aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
+            <Icon name="X" className="size-3.5" />
+          </Button>
+        </div>
+        {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
+        {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
+        <FileTreePanel root={chosen?.workspace ?? null} />
       </div>
-      <div className="flex shrink-0 items-center gap-1 border-b border-sidebar-border px-1.5 py-1">
-        <select
-          aria-label="File tree folder"
-          title="Pinned folder — changing threads does not change this tree"
-          value={selectedId ?? ""}
-          onChange={(event) => {
-            const id = event.target.value;
-            setSelectedId(id);
-            writePinnedRoot(id);
-          }}
-          className="min-w-0 flex-1 truncate bg-sidebar text-[11px] text-sidebar-foreground outline-none"
-        >
-          {selectedId === null || chosen === undefined ? <option value={selectedId ?? ""}>Choose a folder</option> : null}
-          {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-        </select>
-        <button type="button" aria-label="Refresh folder list" title="Refresh folder list"
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-state-hover"
-          onClick={() => setRefreshCount((count) => count + 1)}>
-          <Icon name="RotateCcw" className="size-3" />
-        </button>
-      </div>
-      {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
-      {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
-      <FileTreePanel root={chosen?.workspace ?? null} />
     </aside>,
     document.body,
   );
