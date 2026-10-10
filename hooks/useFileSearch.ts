@@ -7,7 +7,7 @@ import {
 } from "react";
 import { useBbContext, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
-import { openWorkspaceFile } from "@/lib/open-preview";
+import { openWorkspaceFile, previewFailureMessage } from "@/lib/open-preview";
 import { surfaceNavigation } from "@/lib/surface-navigation";
 import { subscribeSearchFocus } from "@/lib/search-focus-bus";
 import type { rpcContract, SearchHit } from "../contract";
@@ -108,9 +108,7 @@ export function useFileSearch(tree: TreeModel) {
         landed.workspace,
         landed.relativePath,
       );
-      if (!opened) toast.error(navigation === null
-        ? "Open a thread or New Thread page to preview files."
-        : "Could not open the file preview.");
+      if (!opened) toast.error(previewFailureMessage(navigation, threadId));
     },
     [clear, threadId, tree],
   );

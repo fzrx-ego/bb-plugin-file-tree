@@ -57,6 +57,22 @@ export function openWorkspaceFile(
   }
 }
 
+/**
+ * Toast text for a preview bb refused. The New Thread page has no thread yet,
+ * and bb opens a host path in its preview only inside a thread, so a file of a
+ * pinned project outside the compose environment cannot open there.
+ */
+export function previewFailureMessage(
+  navigate: Navigate | null,
+  threadId: string | null,
+): string {
+  if (navigate === null) return "Open a thread or New Thread page to preview files.";
+  if (threadId === null) {
+    return "On the New Thread page bb previews only files of the thread environment. Open a thread to preview this file.";
+  }
+  return "Could not open the file preview.";
+}
+
 const PREVIEW_ONCE_KEY = "md-editor:preview-once";
 const PREVIEW_ONCE_EVENT = "md-editor:preview-once";
 

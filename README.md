@@ -19,7 +19,7 @@ Or search **File Tree** in BB Community.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
 - Files show Seti-style type icons (markdown, JSON, git, `.env`, README, TypeScript, …), as in Cursor. Folders keep only the chevron.
-- In a thread or on the New Thread page, click a file to open BB's default preview.
+- In a thread or on the New Thread page, click a file to open BB's default preview. On the New Thread page BB previews only files of the thread environment; open a file of another project from a thread.
 - Right-click a file to open it in the external editor when the current BB page has no preview panel.
 - Right-click a Markdown file and choose Open in preview to see it in BB's standard preview when Markdown PRO would open it in its editor.
 - Right-click to add the absolute path to an open chat draft, create a blank `.md` in that folder, delete a file, copy a relative or absolute path, copy the file itself, or reveal it in Finder. When several drafts are open, choose the target in the file menu. Right-click the root name at the top of the tree to create the file there. A new markdown file is named `untitled.md` (or `untitled-2.md`, …) and opens in the external editor so you can paste into it. Delete asks for confirmation and only applies to files, not folders.

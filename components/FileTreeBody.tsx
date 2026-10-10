@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
-import { isMarkdownFile, openStandardPreview, openWorkspaceFile } from "@/lib/open-preview";
+import { isMarkdownFile, openStandardPreview, openWorkspaceFile, previewFailureMessage } from "@/lib/open-preview";
 import { surfaceNavigation } from "@/lib/surface-navigation";
 import { getChatTargets, requestAddToChat, subscribeChatTargets, type ChatTarget } from "@/lib/chat-draft-bus";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
@@ -123,9 +123,7 @@ function TreeRow({
         void rpc.call("clientLog", { message }).catch(() => undefined);
       },
     );
-    if (!opened) toast.error(navigation === null
-      ? "Open a thread or New Thread page to preview files."
-      : "Could not open the file preview.");
+    if (!opened) toast.error(previewFailureMessage(navigation, threadId));
   };
 
   const openInPreview = () => {

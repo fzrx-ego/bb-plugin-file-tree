@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Workspace } from "../contract";
-import { openWorkspaceFile } from "./open-preview";
+import { openWorkspaceFile, previewFailureMessage } from "./open-preview";
 import { registerSurfaceNavigation, surfaceNavigation } from "./surface-navigation";
 
 test("window tree opens through the current thread surface", () => {
@@ -40,4 +40,11 @@ test("cleanup of an old mount keeps the newer navigator", () => {
   assert.equal(surfaceNavigation("thread-current"), newNavigate);
   unregisterNew();
   assert.equal(surfaceNavigation("thread-current"), null);
+});
+
+test("a refused preview on the New Thread page says to open a thread", () => {
+  const navigate = {} as Parameters<typeof registerSurfaceNavigation>[1];
+  assert.match(previewFailureMessage(navigate, null), /Open a thread to preview this file/u);
+  assert.equal(previewFailureMessage(navigate, "thread-current"), "Could not open the file preview.");
+  assert.equal(previewFailureMessage(null, null), "Open a thread or New Thread page to preview files.");
 });
