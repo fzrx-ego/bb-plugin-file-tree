@@ -162,12 +162,12 @@ export function GlobalFileTreeRail() {
             </select>
             <Icon name="ChevronDown" className="pointer-events-none absolute right-1.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           </div>
-          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground"
+          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
             aria-label="Refresh folder list"
             onClick={() => setRefreshCount((count) => count + 1)}>
             <Icon name="RotateCcw" className="size-3.5" />
           </Button>
-          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground"
+          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
             aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
             <Icon name="X" className="size-3.5" />
           </Button>
