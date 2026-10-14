@@ -80,8 +80,43 @@ type ContextMenuShortcutProps = React.HTMLAttributes<HTMLSpanElement>;
 // Context menus portal to the document root and must paint above those tiers.
 const CONTEXT_MENU_LAYER_CLASS = "z-[70]";
 
-const ContextMenu = ContextMenuPrimitive.Root;
-const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+// Radix pins the root menu to side="right" align="start" at the click point
+// and, when the menu does not fit below, shifts it up over the cursor. The
+// right-button release then lands on an item and selects it. The trigger
+// records the click Y so the content can open upward instead.
+const ContextMenuPointContext = React.createContext<React.MutableRefObject<
+  number | null
+> | null>(null);
+
+function ContextMenu(
+  props: React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Root>,
+) {
+  const pointYRef = React.useRef<number | null>(null);
+  return (
+    <ContextMenuPointContext.Provider value={pointYRef}>
+      <ContextMenuPrimitive.Root {...props} />
+    </ContextMenuPointContext.Provider>
+  );
+}
+
+const ContextMenuTrigger = React.forwardRef<
+  React.ComponentRef<typeof ContextMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Trigger>
+>(({ onContextMenu, ...props }, ref) => {
+  const pointYRef = React.useContext(ContextMenuPointContext);
+  return (
+    <ContextMenuPrimitive.Trigger
+      ref={ref}
+      onContextMenu={(event) => {
+        if (pointYRef) pointYRef.current = event.clientY;
+        onContextMenu?.(event);
+      }}
+      {...props}
+    />
+  );
+});
+ContextMenuTrigger.displayName = ContextMenuPrimitive.Trigger.displayName;
+
 const ContextMenuGroup = ContextMenuPrimitive.Group;
 const ContextMenuPortal = ContextMenuPrimitive.Portal;
 const ContextMenuSub = ContextMenuPrimitive.Sub;
@@ -150,24 +185,48 @@ ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName;
 const ContextMenuContent = React.forwardRef<
   ContextMenuContentElement,
   ContextMenuContentProps
->(({ className, children, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
-    <ContextMenuPrimitive.Content
-      ref={ref}
-      // Portaled outside every plugin mount; re-attach the plugin CSS scope
-      // when rendered from a plugin slot (see portal-scope.ts).
-      {...usePortalScopeProps()}
-      className={cn(
-        CONTEXT_MENU_LAYER_CLASS,
-        "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className,
-      )}
-      {...props}
-    >
-      <MenuHoverProvider>{children}</MenuHoverProvider>
-    </ContextMenuPrimitive.Content>
-  </ContextMenuPrimitive.Portal>
-));
+>(({ className, children, ...props }, ref) => {
+  const pointYRef = React.useContext(ContextMenuPointContext);
+  const [alignOffset, setAlignOffset] = React.useState(0);
+
+  // This wrapper stays mounted while Radix mounts the menu element on every
+  // open, so the measurement runs when the element attaches. With
+  // align="start" a negative offset of the menu height puts its bottom edge
+  // at the click point. When the menu fits neither way, Radix shifts it.
+  const setRefs = React.useCallback(
+    (node: ContextMenuContentElement | null) => {
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+      const clickY = pointYRef?.current;
+      if (!node || clickY == null) return;
+      const height = node.offsetHeight;
+      const fitsBelow = clickY + height <= window.innerHeight;
+      const fitsAbove = height <= clickY;
+      setAlignOffset(!fitsBelow && fitsAbove ? -height : 0);
+    },
+    [ref, pointYRef],
+  );
+
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Content
+        ref={setRefs}
+        // Portaled outside every plugin mount; re-attach the plugin CSS scope
+        // when rendered from a plugin slot (see portal-scope.ts).
+        {...usePortalScopeProps()}
+        alignOffset={alignOffset}
+        className={cn(
+          CONTEXT_MENU_LAYER_CLASS,
+          "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          className,
+        )}
+        {...props}
+      >
+        <MenuHoverProvider>{children}</MenuHoverProvider>
+      </ContextMenuPrimitive.Content>
+    </ContextMenuPrimitive.Portal>
+  );
+});
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName;
 
 const ContextMenuItem = React.forwardRef<
