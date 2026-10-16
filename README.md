@@ -18,7 +18,7 @@ Or search **File Tree** in BB Community.
 - In BB's framed desktop window the tree is a card beside the thread, aligned to BB's own cards.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
-- Files show Seti-style type icons (markdown, JSON, git, `.env`, README, TypeScript, …), as in Cursor. Folders keep only the chevron.
+- Files show the icons of VS Code's Seti theme, resolved the way VS Code resolves them, so hundreds of file types get their own icon (Julia, TypeScript, Python, TeX, Docker, …). Colors follow BB's light and dark themes. Folders keep only the chevron. `npm run generate:icons` refreshes the icon data from a pinned VS Code commit.
 - In a thread or on the New Thread page, click a file to open BB's default preview. On the New Thread page BB previews only files of the thread environment; open a file of another project from a thread.
 - Right-click a file to open it in the external editor when the current BB page has no preview panel.
 - Right-click a Markdown file and choose Open in preview to see it in BB's standard preview when Markdown PRO would open it in its editor.

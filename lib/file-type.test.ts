@@ -1,38 +1,54 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SETI, fileTypeIcon } from "./file-type.ts";
+import { fileTypeIcon } from "./file-type.ts";
 
-test("README.md uses the info glyph", () => {
-  assert.equal(fileTypeIcon("README.md").glyph, "info");
-  assert.equal(fileTypeIcon("docs/readme.md").glyph, "info");
+const icon = (name: string) => fileTypeIcon(name).id;
+
+test("README.md uses the info icon", () => {
+  assert.equal(icon("README.md"), "_info");
+  assert.equal(icon("docs/readme.md"), "_info");
 });
 
-test("markdown files use the markdown glyph", () => {
-  assert.equal(fileTypeIcon("AGENTS.md").glyph, "markdown");
-  assert.equal(fileTypeIcon("CLAUDE.md").color, SETI.blue);
+test("markdown files use the markdown icon", () => {
+  assert.equal(icon("AGENTS.md"), "_markdown");
+  assert.equal(icon("notes.mdx"), "_markdown");
 });
 
-test("json files use braces", () => {
-  assert.equal(fileTypeIcon("mcp.json").glyph, "json");
-  assert.equal(fileTypeIcon(".mcp.json").glyph, "json");
-  assert.equal(fileTypeIcon("package.json").glyph, "npm");
+test("languages Seti maps only by language id resolve through their extensions", () => {
+  assert.equal(icon("solver.jl"), "_julia");
+  assert.equal(icon("server.ts"), "_typescript");
+  assert.equal(icon("main.py"), "_python");
+  assert.equal(icon("paper.tex"), "_tex");
+  assert.equal(icon("mcp.json"), "_json");
 });
 
-test("git ignore files use the git glyph", () => {
-  assert.equal(fileTypeIcon(".gitignore").glyph, "git");
-  assert.equal(fileTypeIcon(".cursorignore").glyph, "git");
+test("the longest matching extension wins", () => {
+  assert.equal(icon("app.tsx"), "_react");
+  assert.notEqual(icon("app.test.ts"), icon("app.ts"));
 });
 
-test("env files use the config glyph", () => {
-  assert.equal(fileTypeIcon(".env").glyph, "config");
-  assert.equal(fileTypeIcon(".env.local").glyph, "config");
+test("file names beat extensions, case-insensitively", () => {
+  assert.equal(icon("tsconfig.json"), "_tsconfig");
+  assert.equal(icon("Dockerfile"), "_docker");
+  assert.equal(icon("go.mod"), "_go");
 });
 
-test("typescript and react split", () => {
-  assert.equal(fileTypeIcon("app.tsx").glyph, "react");
-  assert.equal(fileTypeIcon("server.ts").glyph, "code");
+test("dotfiles keep their git and config icons", () => {
+  assert.equal(icon(".gitignore"), "_git");
+  assert.equal(icon(".cursorignore"), "_git");
+  assert.equal(icon(".env"), "_config");
+  assert.equal(icon(".env.local"), "_config");
 });
 
-test("unknown files fall back to default", () => {
-  assert.equal(fileTypeIcon("weird.bin").glyph, "default");
+test("every icon has a glyph and both theme colors", () => {
+  const { glyph, color, lightColor } = fileTypeIcon("solver.jl");
+  assert.equal(glyph.length, 1);
+  assert.match(color, /^#[0-9a-f]{6}$/u);
+  assert.match(lightColor, /^#[0-9a-f]{6}$/u);
+  assert.notEqual(color, lightColor);
+});
+
+test("unknown files fall back to the default icon", () => {
+  assert.equal(icon("weird.bin"), "_default");
+  assert.equal(icon("Makefile.bak.unknownext"), "_default");
 });
