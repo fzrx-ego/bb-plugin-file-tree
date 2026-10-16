@@ -7,7 +7,6 @@ import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport
 import { FileTreePanel } from "@/components/FileTreePanel";
 import { RailResizeHandle } from "@/components/RailResizeHandle";
 import { RootPicker } from "@/components/RootPicker";
-import { TitleBarFileTreeToggle } from "@/components/TitleBarFileTreeToggle";
 import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { RAIL_EVENT, initializeRailOpen, writeStoredOpen } from "@/lib/rail-state";
@@ -114,11 +113,9 @@ export function GlobalFileTreeRail() {
 
   if (!ready) return null;
   // In BB's framed window the rail is a card on the window backdrop, like the
-  // content card beside it, and its toggle joins BB's title-bar buttons.
+  // content card beside it, and leaves the chrome row to BB's own controls.
   const framed = frame !== null && !compact;
-  return <>
-    {framed ? <TitleBarFileTreeToggle open={railOpen} /> : null}
-    {createPortal(
+  return createPortal(
     <aside
       {...portalScopeProps}
       className="fixed bottom-0 right-0 top-0 z-40 flex-col text-sidebar-foreground"
@@ -172,6 +169,5 @@ export function GlobalFileTreeRail() {
       </div>
     </aside>,
     document.body,
-    )}
-  </>;
+  );
 }
