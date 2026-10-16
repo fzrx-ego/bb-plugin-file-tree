@@ -6,6 +6,9 @@
     "bb": ">=0.43.4",
     "bbPluginSdk": ">=0.5.9"
   },
+  "scripts": {
+    "generate:icons": "node scripts/generate-seti-icons.mjs"
+  },
   "bb": {
     "name": "File Tree",
     "description": "Shows a pinned file tree across BB threads. Search, preview, add paths to chat, or reveal files in Finder.",
