@@ -112,12 +112,32 @@ export function GlobalFileTreeRail() {
     return acquireRailInset(insetHolderId);
   }, [compact, insetHolderId, railOpen]);
 
+  const rootControls = <>
+    <div className="flex min-w-0 flex-1">
+      <RootPicker
+        choices={choices}
+        selectedId={selectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          writePinnedRoot(id);
+        }}
+      />
+    </div>
+    <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+      aria-label="Refresh folder list"
+      onClick={() => setRefreshCount((count) => count + 1)}>
+      <Icon name="RotateCcw" className="size-3.5" />
+    </Button>
+  </>;
+
   if (!ready) return null;
   // In BB's framed window the rail is a card on the window backdrop, like the
   // content card beside it, and its toggle joins BB's title-bar buttons.
   const framed = frame !== null && !compact;
   return <>
-    {framed ? <TitleBarFileTreeToggle open={railOpen} /> : null}
+    {framed ? <TitleBarFileTreeToggle open={railOpen} railWidthPx={railWidthPx} frameLip={frame.lip}>
+      {rootControls}
+    </TitleBarFileTreeToggle> : null}
     {createPortal(
     <aside
       {...portalScopeProps}
@@ -145,27 +165,13 @@ export function GlobalFileTreeRail() {
         )}
         style={framed ? { borderColor: "var(--border-seam)" } : undefined}
       >
-        <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
-          <div className="flex min-w-0 flex-1">
-            <RootPicker
-              choices={choices}
-              selectedId={selectedId}
-              onSelect={(id) => {
-                setSelectedId(id);
-                writePinnedRoot(id);
-              }}
-            />
-          </div>
-          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
-            aria-label="Refresh folder list"
-            onClick={() => setRefreshCount((count) => count + 1)}>
-            <Icon name="RotateCcw" className="size-3.5" />
-          </Button>
+        {framed ? null : <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
+          {rootControls}
           <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
             aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
             <Icon name="X" className="size-3.5" />
           </Button>
-        </div>
+        </div>}
         {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
         {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
         <FileTreePanel root={chosen?.workspace ?? null} enabled={railOpen} refreshCount={refreshCount} />

@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -12,7 +12,17 @@ const GAP_PX = 4;
 /** Reserve the tree button's width in BB's native trailing controls. */
 const TITLE_BAR_RULE = `[data-testid="app-window-title-bar"]{padding-right:calc(0.75rem + ${BUTTON_PX + GAP_PX}px)!important}`;
 
-export function TitleBarFileTreeToggle({ open }: { open: boolean }) {
+export function TitleBarFileTreeToggle({
+  open,
+  railWidthPx,
+  frameLip,
+  children,
+}: {
+  open: boolean;
+  railWidthPx: number;
+  frameLip: string;
+  children: ReactNode;
+}) {
   const portalScopeProps = usePortalScopeProps();
 
   useLayoutEffect(() => {
@@ -34,17 +44,20 @@ export function TitleBarFileTreeToggle({ open }: { open: boolean }) {
     <div
       {...portalScopeProps}
       // Above the title bar (BB z-index 44), below BB's shared overlays (50).
-      className="fixed z-[45] flex items-center [app-region:no-drag] [-webkit-app-region:no-drag]"
+      className="fixed z-[45] flex items-center gap-0.5 [app-region:no-drag] [-webkit-app-region:no-drag]"
+      data-file-tree-title-bar=""
       style={{
         right: "calc(var(--bb-title-bar-trailing-edge-gap, 0.75rem) + 1px)",
+        left: open ? `calc(100vw - ${railWidthPx}px - ${frameLip})` : undefined,
         top: `calc((var(--bb-window-title-bar-height) - ${BUTTON_PX}px) / 2)`,
       }}
     >
+      {open ? children : null}
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-7 rounded-md p-0"
+        className="size-7 shrink-0 rounded-md p-0"
         aria-label={open ? "Hide file tree" : "Show file tree"}
         aria-pressed={open}
         onClick={toggleRailOpen}
