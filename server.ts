@@ -1,6 +1,6 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { rpcContract } from "./contract";
-import { hostContract } from "./host-contract";
+import { hostContract, hostSignals } from "./host-contract";
 import type { PathProbe } from "./src/reveal";
 import { createBlankMarkdown } from "./src/blank-markdown";
 import { deleteFile } from "./src/delete-file";
@@ -22,7 +22,13 @@ export { rpcContract } from "./contract";
 
 export default async function plugin(bb: BbPluginApi): Promise<void> {
   bb.log.info("loaded");
-  const host = bb.hosts.experimental_client({ contract: hostContract });
+  const host = bb.hosts.experimental_client({ contract: hostContract, experimental_signals: hostSignals });
+  const offWatch = host.experimental_onSignal("directoriesChanged", ({ hostId, payload }) => {
+    if (resolveRoot(payload.rootId)?.hostId !== hostId) return;
+    invalidateListings(payload.rootId);
+    bb.realtime.publish("directoriesChanged", payload);
+  });
+  bb.onDispose(offWatch);
   const probe: PathProbe = (hostId, rootPath, relativePath) =>
     host.call("statPath", { rootPath, relativePath }, { hostId });
   const onThisComputer = async (rootId: string): Promise<boolean> => {
@@ -71,6 +77,16 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   };
 
   bb.rpc.register(rpcContract, {
+    statPath: async ({ rootId, relativePath }) => {
+      const root = resolveRoot(rootId);
+      if (!root) throw new Error("File tree root expired. Choose the folder again.");
+      return probe(root.hostId, root.rootPath, relativePath);
+    },
+    syncDirectoryWatch: async (input) => {
+      const root = resolveRoot(input.rootId);
+      if (!root) throw new Error("File tree root expired. Choose the folder again.");
+      return host.call("syncDirectoryWatch", { ...input, rootPath: root.rootPath }, { hostId: root.hostId });
+    },
     listRootChoices: async (input) => ({
       choices: await listRootChoices(bb, input, await getTreeRoot()),
     }),

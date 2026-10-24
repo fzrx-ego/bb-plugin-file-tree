@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { FileTreeBody } from "@/components/FileTreeBody";
 import {
   FileTreeSearchBox,
@@ -9,10 +10,19 @@ import type { Workspace } from "../contract";
 
 export function FileTreePanel({
   root,
+  enabled = true,
+  refreshCount = 0,
 }: {
   root: Workspace | null;
+  enabled?: boolean;
+  refreshCount?: number;
 }) {
-  const tree = useWorkspaceTree(root);
+  const tree = useWorkspaceTree(root, enabled);
+  const reloadRef = useRef(tree.reload);
+  reloadRef.current = tree.reload;
+  useEffect(() => {
+    if (refreshCount > 0) reloadRef.current();
+  }, [refreshCount]);
   const search = useFileSearch(tree);
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">

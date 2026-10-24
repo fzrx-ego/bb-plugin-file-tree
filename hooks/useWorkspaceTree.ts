@@ -3,6 +3,8 @@ import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { subscribeReveal } from "@/lib/reveal-bus";
 import { includeRevealedChild, type VisibleReveal } from "@/lib/visible-reveal";
+import { useLiveDirectories } from "./useLiveDirectories";
+import { visibleDirectories } from "@/lib/visible-directories";
 import type { rpcContract, TreeEntry, Workspace } from "../contract";
 
 function ancestorChain(relativePath: string): string[] {
@@ -27,7 +29,7 @@ type DirState =
   | { status: "error"; message: string };
 
 /** Tree state belongs to the pinned navigator root, not the current route. */
-export function useWorkspaceTree(root: Workspace | null) {
+export function useWorkspaceTree(root: Workspace | null, enabled = true) {
   const rpc = useRpc<typeof rpcContract>();
   const { values, isLoading: settingsLoading } = useSettings();
   const showSkipped = values?.showSkipped === true;
@@ -53,8 +55,16 @@ export function useWorkspaceTree(root: Workspace | null) {
   const activeRootId = active?.rootId ?? "";
   const stateKey = `${activeRootId}\n${showSkipped}`;
   const stateKeyRef = useRef(stateKey);
+  const stateEpoch = useRef(0);
+  if (stateKeyRef.current !== stateKey) stateEpoch.current += 1;
   stateKeyRef.current = stateKey;
-  const loadVersions = useRef(new Map<string, number>());
+  const inFlight = useRef(new Map<string, { epoch: number; dirty: boolean; promise: Promise<void> }>());
+  const revealRef = useRef(visibleReveal);
+  revealRef.current = visibleReveal;
+  const revealValidation = useRef<{
+    target: VisibleReveal; epoch: number; dirty: boolean; promise: Promise<void>;
+  } | null>(null);
+  useEffect(() => () => { stateEpoch.current += 1; }, []);
   const visibleDirs = useMemo(() => {
     if (visibleReveal === null || visibleReveal.rootId !== activeRootId) return dirs;
     const next: Record<string, DirState> = {};
@@ -67,44 +77,57 @@ export function useWorkspaceTree(root: Workspace | null) {
   }, [activeRootId, dirs, visibleReveal]);
 
   const loadDir = useCallback(
-    async (workspace: Workspace, relativePath: string) => {
-      const loadKey = `${workspace.rootId}\n${relativePath}`;
-      const version = (loadVersions.current.get(loadKey) ?? 0) + 1;
-      loadVersions.current.set(loadKey, version);
-      setDirs((prev) => ({ ...prev, [relativePath]: { status: "loading" } }));
-      try {
-        const { entries } = await rpc.call("listDir", {
-          rootId: workspace.rootId,
-          relativePath,
-          showSkipped,
-        });
-        if (stateKeyRef.current !== `${workspace.rootId}\n${showSkipped}` ||
-          loadVersions.current.get(loadKey) !== version) return;
-        setDirs((prev) => ({ ...prev, [relativePath]: { status: "ready", entries } }));
-      } catch (cause) {
-        if (stateKeyRef.current !== `${workspace.rootId}\n${showSkipped}` ||
-          loadVersions.current.get(loadKey) !== version) return;
-        setDirs((prev) => ({
-          ...prev,
-          [relativePath]: {
-            status: "error",
-            message: cause instanceof Error ? cause.message : String(cause),
-          },
-        }));
+    (workspace: Workspace, relativePath: string, background = false): Promise<void> => {
+      const scope = `${workspace.rootId}\n${showSkipped}`;
+      if (stateKeyRef.current !== scope) return Promise.resolve();
+      const epoch = stateEpoch.current;
+      const loadKey = `${scope}\n${relativePath}`;
+      const pending = inFlight.current.get(loadKey);
+      if (pending?.epoch === epoch) {
+        pending.dirty = true;
+        return pending.promise;
       }
+      const request = { epoch, dirty: false, promise: Promise.resolve() };
+      const isCurrent = () => stateKeyRef.current === scope && stateEpoch.current === epoch;
+      inFlight.current.set(loadKey, request);
+      request.promise = (async () => {
+        let keepEntries = background;
+        do {
+          request.dirty = false;
+          setDirs((prev) => keepEntries && prev[relativePath]?.status === "ready"
+            ? prev : { ...prev, [relativePath]: { status: "loading" } });
+          keepEntries = true;
+          try {
+            const { entries } = await rpc.call("listDir", {
+              rootId: workspace.rootId, relativePath, showSkipped, fresh: true,
+            });
+            if (!isCurrent()) return;
+            // Publish progress even if another filesystem event arrived during the call.
+            setDirs((prev) => ({ ...prev, [relativePath]: { status: "ready", entries } }));
+          } catch (cause) {
+            if (!isCurrent()) return;
+            setDirs((prev) => ({
+              ...prev,
+              [relativePath]: { status: "error", message: cause instanceof Error ? cause.message : String(cause) },
+            }));
+          }
+        } while (request.dirty && isCurrent());
+      })().finally(() => {
+        if (inFlight.current.get(loadKey) === request) inFlight.current.delete(loadKey);
+      });
+      return request.promise;
     },
     [rpc, showSkipped],
   );
 
   useEffect(() => {
-    loadVersions.current.clear();
     dirsRef.current = {};
     setDirs({});
   }, [activeRootId, showSkipped]);
 
   useEffect(() => {
     if (active === null) return;
-    for (const path of expanded) {
+    for (const path of visibleDirectories(expanded)) {
       const current = dirsRef.current[path];
       if (current?.status === "ready" || current?.status === "loading") continue;
       void loadDir(active, path);
@@ -174,13 +197,61 @@ export function useWorkspaceTree(root: Workspace | null) {
   }), [reveal]);
 
   const toggleDir = useCallback((relativePath: string) => {
+    const current = activeRef.current;
+    if (!expanded.has(relativePath) && current !== null) void loadDir(current, relativePath);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(relativePath)) next.delete(relativePath);
       else next.add(relativePath);
       return next;
     });
-  }, []);
+  }, [expanded, loadDir]);
+
+  const revalidateReveal = useCallback((paths: string[]): Promise<void> => {
+    const target = revealRef.current;
+    if (!target || target.rootId !== activeRef.current?.rootId || !paths.some((parent) =>
+      parent === "" || target.relativePath === parent || target.relativePath.startsWith(`${parent}/`))) return Promise.resolve();
+    const epoch = stateEpoch.current;
+    const pending = revealValidation.current;
+    if (pending?.target === target && pending.epoch === epoch) {
+      pending.dirty = true;
+      return pending.promise;
+    }
+    const request = { target, epoch, dirty: false, promise: Promise.resolve() };
+    const isCurrent = () => revealRef.current === target && stateEpoch.current === epoch;
+    revealValidation.current = request;
+    request.promise = (async () => {
+      do {
+        request.dirty = false;
+        try {
+          const result = await rpc.call("statPath", { rootId: target.rootId, relativePath: target.relativePath });
+          if (!isCurrent()) return;
+          if (result === null) {
+            revealRef.current = null;
+            setVisibleReveal((current) => current === target ? null : current);
+            setSelected((current) => current === target.relativePath ? null : current);
+            return;
+          }
+        } catch (cause) {
+          if (!isCurrent()) return;
+          toast.error(`File tree reveal: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      } while (request.dirty && isCurrent());
+    })().finally(() => {
+      if (revealValidation.current === request) revealValidation.current = null;
+    });
+    return request.promise;
+  }, [rpc]);
+
+  useLiveDirectories(activeRootId, visibleDirectories(expanded), enabled, (paths) => {
+    void revalidateReveal(paths);
+    const current = activeRef.current;
+    if (current === null) return;
+    const visible = new Set(visibleDirectories(expanded));
+    for (const path of paths) {
+      if (visible.has(path)) void loadDir(current, path, true);
+    }
+  });
 
   const showCreated = useCallback(async (relativePath: string) => {
     const workspace = activeRef.current;
@@ -213,7 +284,7 @@ export function useWorkspaceTree(root: Workspace | null) {
     }
     const current = activeRef.current;
     if (current === null) return;
-    for (const path of expanded) void loadDir(current, path);
+    for (const path of visibleDirectories(expanded)) void loadDir(current, path);
   }, [expanded, loadDir, rerooted]);
 
   return {

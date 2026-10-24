@@ -213,6 +213,31 @@ export async function resolveOne(
   return searchByName(bb, workspace, relativePath);
 }
 
+/** Storage locations come from BB on their owning host, never from client paths. */
+function makeThreadStorageResolver(bb: BbPluginApi, threadId: string, probe: PathProbe) {
+  let location: Promise<{ hostId: string; storageRootPath: string } | null> | undefined;
+  return async (raw: string) => {
+    if (!path.isAbsolute(expandHome(raw.trim()))) return null;
+    location ??= bb.sdk.threads.storageLocation({ threadId }).catch((cause: unknown) => {
+      bb.log.warn(`Cannot locate thread files: ${cause instanceof Error ? cause.message : String(cause)}`);
+      return null;
+    });
+    const storage = await location;
+    if (storage === null) return null;
+    const relativePath = toWorkspaceRelative(storage.storageRootPath, raw);
+    if (relativePath === null) return null;
+    const target = await statUnderRoot(probe, storage.hostId, storage.storageRootPath, relativePath);
+    if (target === null) return null;
+    const root: RevealRoot = {
+      hostId: storage.hostId,
+      rootPath: storage.storageRootPath,
+      rootName: "Thread files",
+      rootId: registerRoot(storage.hostId, storage.storageRootPath),
+    };
+    return { relativePath: target.relativePath, isDirectory: target.isDirectory, root, ancestor: false };
+  };
+}
+
 export async function resolveInWorkspace(
   bb: BbPluginApi,
   input: { threadId: string; path: string },
@@ -221,7 +246,10 @@ export async function resolveInWorkspace(
 ): Promise<RevealResult> {
   probe = resilientProbe(bb, probe);
   const result = await workspaceForThread(bb, input.threadId);
+  const resolveStorage = makeThreadStorageResolver(bb, input.threadId, probe);
   if (!result.ok) {
+    const stored = await resolveStorage(input.path);
+    if (stored !== null) return { ok: true, relativePath: stored.relativePath, isDirectory: stored.isDirectory, root: stored.root };
     return { ok: false, message: `No workspace for this thread (${result.reason})` };
   }
   const workspace = result.workspace;
@@ -235,6 +263,9 @@ export async function resolveInWorkspace(
       root: null,
     };
   }
+
+  const stored = await resolveStorage(input.path);
+  if (stored !== null) return { ok: true, relativePath: stored.relativePath, isDirectory: stored.isDirectory, root: stored.root };
 
   // Agents cite paths from anywhere, and most of them are outside whichever
   // workspace the thread happens to run in. Re-root the tree instead of
@@ -404,7 +435,7 @@ export async function resolvePaths(
 ): Promise<{ known: string[] }> {
   probe = resilientProbe(bb, probe);
   const result = await workspaceForThread(bb, input.threadId);
-  if (!result.ok) return { known: [] };
+  const resolveStorage = makeThreadStorageResolver(bb, input.threadId, probe);
 
   // Whatever the icon promises, the click must deliver — so this asks exactly
   // the same question the click will, including the other projects.
@@ -412,8 +443,10 @@ export async function resolvePaths(
   // stat storm. A few at a time still answers the whole batch.
   const settled = await mapLimit(input.paths, 4, async (raw) => {
     try {
-      const here = await resolveOne(bb, result.workspace, raw, probe);
+      const here = result.ok ? await resolveOne(bb, result.workspace, raw, probe) : null;
       if (here !== null && !here.ancestor) return raw;
+      if (await resolveStorage(raw) !== null) return raw;
+      if (!result.ok) return null;
       const elsewhere = await findOutsideWorkspace(
         bb,
         result.workspace.rootPath,

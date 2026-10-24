@@ -161,14 +161,6 @@ function anchorTargetPath(anchor: HTMLAnchorElement): string | null {
   return filePathFromHref(anchor.getAttribute("href") ?? "");
 }
 
-/** Use BB's rendered preview glyph as the signal, independent of link text. */
-function hasNativePreviewGlyph(anchor: HTMLAnchorElement): boolean {
-  for (const graphic of Array.from(anchor.querySelectorAll("svg, img"))) {
-    if (graphic.closest(`button[${BUTTON_ATTR}]`) === null) return true;
-  }
-  const next = anchor.nextElementSibling;
-  return next !== null && (next.matches("svg, img") || next.querySelector("svg, img") !== null);
-}
 
 function anchorKey(text: string, href: string): string {
   return `${text}\n${href}`;
@@ -329,12 +321,12 @@ export function mountChatPathButtons(
     for (const code of chatQuery<Element>("code, a")) {
       // A `<code>` inside an `<a>` matches twice; let the inner one win so the
       // path gets one button, not two.
-      const previewPath = code instanceof HTMLAnchorElement && hasNativePreviewGlyph(code)
+      const previewPath = code instanceof HTMLAnchorElement
         ? anchorTargetPath(code)
         : null;
       if (previewPath === null && code.querySelector("code, a") !== null) continue;
       if (!(code instanceof HTMLAnchorElement) && code.closest("a") !== null &&
-        hasNativePreviewGlyph(code.closest("a") as HTMLAnchorElement)) continue;
+        anchorTargetPath(code.closest("a") as HTMLAnchorElement) !== null) continue;
       codes += 1;
       const hrefPath = code instanceof HTMLAnchorElement ? anchorTargetPath(code) : null;
       const stored = hrefPath !== null
@@ -439,8 +431,8 @@ export function mountChatPathButtons(
   };
 
   /**
-   * BB handles file-link clicks with a delegated capture-phase listener, and
-   * the button can sit inside such a link, so claim the event first. Only the
+   * Claim window capture before BB's document capture handles the enclosing
+   * file link, so the tree button keeps its own action. Only the
    * click may call preventDefault(): doing it on pointerdown or mousedown
    * cancels the click that would otherwise follow.
    */
@@ -505,7 +497,7 @@ export function mountChatPathButtons(
     "click",
     "auxclick",
   ]) {
-    document.addEventListener(type, onEarly, opts);
+    window.addEventListener(type, onEarly, opts);
   }
 
   const insideChat = (node: Node): boolean => {

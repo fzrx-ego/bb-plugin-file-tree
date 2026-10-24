@@ -115,7 +115,21 @@ export const anchorFixSchema = z.object({
 });
 export type AnchorFix = z.infer<typeof anchorFixSchema>;
 
+export const directoryChangeSchema = z.object({
+  watchId: z.string().uuid(),
+  rootId: z.string().min(1),
+  relativePaths: z.array(z.string().max(4096)).max(256),
+}).strict();
+
 export const rpcContract = defineRpcContract({
+  statPath: {
+    input: z.object({ rootId: z.string().min(1), relativePath: z.string().max(4096) }).strict(),
+    output: z.object({ isDirectory: z.boolean() }).strict().nullable(),
+  },
+  syncDirectoryWatch: {
+    input: directoryChangeSchema,
+    output: z.object({ ok: z.literal(true), reset: z.boolean() }),
+  },
   listRootChoices: {
     input: z.object({
       currentThreadId: z.string().min(1).nullable(),
@@ -212,6 +226,7 @@ export const rpcContract = defineRpcContract({
         rootId: z.string().min(1),
         relativePath: z.string(),
         showSkipped: z.boolean(),
+        fresh: z.boolean().optional(),
       })
       .strict(),
     output: z.object({ entries: z.array(treeEntrySchema) }),

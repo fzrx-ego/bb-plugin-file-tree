@@ -28,7 +28,7 @@ export function invalidateListings(rootId?: string): void {
 }
 
 export async function listDir(
-  input: { rootId: string; relativePath: string; showSkipped: boolean },
+  input: { rootId: string; relativePath: string; showSkipped: boolean; fresh?: boolean },
   callHost: HostDirectoryCall,
 ): Promise<{ entries: TreeEntry[] }> {
   const root = resolveRoot(input.rootId);
@@ -38,7 +38,7 @@ export async function listDir(
   resolveUnderRoot(root.rootPath, input.relativePath);
   const cacheKey = `${input.rootId}\n${input.relativePath}\n${input.showSkipped}`;
   const cached = listCache.get(cacheKey);
-  if (cached !== undefined && Date.now() - cached.at < LIST_TTL_MS) {
+  if (!input.fresh && cached !== undefined && Date.now() - cached.at < LIST_TTL_MS) {
     listCache.delete(cacheKey);
     listCache.set(cacheKey, cached);
     return { entries: cached.entries };

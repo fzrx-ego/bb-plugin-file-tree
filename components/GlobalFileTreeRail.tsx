@@ -168,7 +168,7 @@ export function GlobalFileTreeRail() {
         </div>
         {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
         {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
-        <FileTreePanel root={chosen?.workspace ?? null} />
+        <FileTreePanel root={chosen?.workspace ?? null} enabled={railOpen} refreshCount={refreshCount} />
       </div>
     </aside>,
     document.body,

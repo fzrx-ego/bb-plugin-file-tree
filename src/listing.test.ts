@@ -71,3 +71,14 @@ test("an invalidated in-flight listing cannot refill the cache", async () => {
   ] }));
   assert.deepEqual(fresh.entries.map((entry) => entry.name), ["new.md"]);
 });
+
+
+test("explicit fresh listing sees a newly generated document inside the cache TTL", async () => {
+  const rootId = registerRoot("fresh-host", "/fresh/project");
+  const input = { rootId, relativePath: "", showSkipped: false };
+  await listDir(input, async () => ({ entries: [] }));
+  const fresh = await listDir({ ...input, fresh: true }, async () => ({ entries: [
+    { name: "generated.md", relativePath: "generated.md", kind: "file" },
+  ] }));
+  assert.deepEqual(fresh.entries.map((e) => e.name), ["generated.md"]);
+});
