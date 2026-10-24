@@ -5,18 +5,11 @@ import { Icon } from "@/components/ui/icon";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { toggleRailOpen } from "@/lib/rail-state";
 
-/** BB's title-bar buttons: 28px, `rounded-md`, 4px apart, nudged 2px down. */
+/** BB's title-bar buttons: 28px, `rounded-md`, 4px apart. */
 const BUTTON_PX = 28;
 const GAP_PX = 4;
 
-/**
- * BB's framed title bar is `[data-testid="app-window-title-bar"]`: a fixed
- * row with BB's right-panel toggle pushed to its right padding. Widening that
- * padding by one button moves BB's toggle left and frees the corner for the
- * tree toggle, so the two read as one group with the tree outermost, above
- * the tree card. The rule lives in a style element only while this button is
- * mounted.
- */
+/** Reserve the tree button's width in BB's native trailing controls. */
 const TITLE_BAR_RULE = `[data-testid="app-window-title-bar"]{padding-right:calc(0.75rem + ${BUTTON_PX + GAP_PX}px)!important}`;
 
 export function TitleBarFileTreeToggle({ open }: { open: boolean }) {
@@ -25,10 +18,17 @@ export function TitleBarFileTreeToggle({ open }: { open: boolean }) {
   useLayoutEffect(() => {
     const style = document.createElement("style");
     style.dataset.bbPluginFileTree = "title-bar";
-    style.textContent = TITLE_BAR_RULE;
+    // Current BB shares this spacing between inline panel controls and the
+    // split workspace's corner toggle. The open tree already provides room
+    // through its body inset; only a closed tree needs another button slot.
+    const edgeGap = getComputedStyle(document.documentElement)
+      .getPropertyValue("--bb-title-bar-trailing-edge-gap").trim();
+    style.textContent = TITLE_BAR_RULE + (!open && edgeGap !== ""
+      ? `[data-framed]{--bb-title-bar-trailing-edge-gap:calc(${edgeGap} + ${BUTTON_PX + GAP_PX}px)}`
+      : "");
     document.head.append(style);
     return () => style.remove();
-  }, []);
+  }, [open]);
 
   return createPortal(
     <div
@@ -36,9 +36,8 @@ export function TitleBarFileTreeToggle({ open }: { open: boolean }) {
       // Above the title bar (BB z-index 44), below BB's shared overlays (50).
       className="fixed z-[45] flex items-center [app-region:no-drag] [-webkit-app-region:no-drag]"
       style={{
-        right: "0.75rem",
-        top: `calc((var(--bb-app-chrome-row-height) - ${BUTTON_PX}px) / 2)`,
-        transform: "translateY(2px)",
+        right: "calc(var(--bb-title-bar-trailing-edge-gap, 0.75rem) + 1px)",
+        top: `calc((var(--bb-window-title-bar-height) - ${BUTTON_PX}px) / 2)`,
       }}
     >
       <Button
