@@ -140,6 +140,15 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       if (!await onThisComputer(input.rootId)) return { ok: false, message: "This file is on another computer." };
       return copyFileToClipboard(input);
     },
+    createEntry: async ({ rootId, ...entry }) => {
+      const root = resolveRoot(rootId);
+      if (root === undefined) {
+        return { ok: false as const, message: "This file tree panel is out of date — reopen it and try again." };
+      }
+      const result = await host.call("createEntry", { rootPath: root.rootPath, ...entry }, { hostId: root.hostId });
+      if (result.ok) invalidateListings(rootId);
+      return result;
+    },
     createBlankMarkdown: async (input) => {
       const result = await createBlankMarkdown(bb, input);
       if (result.ok) invalidateListings(input.rootId);

@@ -1,5 +1,6 @@
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { hostContract, hostSignals } from "./host-contract";
+import { createHostEntry } from "./src/create-entry";
 import { listHostDirectory, statHostPath } from "./src/host-listing";
 
 import { createDirectoryWatchManager } from "./src/directory-watch";
@@ -18,6 +19,7 @@ export default experimental_defineHostEntry({
       const reset = await manager.update(input, () => context.experimental_retainWorker());
       return { ok: true as const, reset };
     },
+    createEntry: (input) => createHostEntry(input),
     statPath: ({ rootPath, relativePath }) => statHostPath(rootPath, relativePath),
     listDirectory: ({ rootPath, relativePath, showSkipped }) =>
       listHostDirectory(rootPath, relativePath, showSkipped),

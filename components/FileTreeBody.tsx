@@ -1,6 +1,7 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBbContext, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
+import { CreateEntryDialog, type CreateRequest } from "@/components/CreateEntryDialog";
 import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Icon } from "@/components/ui/icon";
 import {
@@ -84,6 +85,7 @@ function TreeRow({
   tree,
   chatTargets,
   activeThreadId,
+  onCreate,
 }: {
   entry: TreeEntry;
   depth: number;
@@ -91,6 +93,7 @@ function TreeRow({
   tree: TreeModel;
   chatTargets: readonly ChatTarget[];
   activeThreadId: string | null;
+  onCreate: (request: CreateRequest) => void;
 }) {
   const overlayNavigate = useBbNavigate();
   const { threadId } = useBbContext();
@@ -260,6 +263,14 @@ function TreeRow({
             <Icon name="FileText" className="size-4" />
             Create blank .md
           </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onCreate({ directoryRelativePath: directoryOf(entry), kind: "file" })}>
+            <Icon name="FileText" className="size-4" />
+            New file…
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onCreate({ directoryRelativePath: directoryOf(entry), kind: "directory" })}>
+            <Icon name="FolderOpen" className="size-4" />
+            New folder…
+          </ContextMenuItem>
           {!isDir ? (
             <ContextMenuItem
               className="text-destructive focus:text-destructive"
@@ -326,6 +337,7 @@ function TreeRow({
               tree={tree}
               chatTargets={chatTargets}
               activeThreadId={activeThreadId}
+              onCreate={onCreate}
             />
           ))
         : null}
@@ -338,6 +350,9 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
   const rpc = useRpc<typeof rpcContract>();
   const { threadId } = useBbContext();
   const chatTargets = useSyncExternalStore(subscribeChatTargets, getChatTargets, getChatTargets);
+  const [createRequest, setCreateRequest] = useState<CreateRequest | null>(null);
+  // Opens after the context menu has finished closing, so it cannot take the dialog's focus.
+  const onCreate = (request: CreateRequest) => { window.setTimeout(() => setCreateRequest(request), 0); };
 
   if (tree.settingsLoading) {
     return (
@@ -390,6 +405,14 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
             <Icon name="FileText" className="size-4" />
             Create blank .md
           </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onCreate({ directoryRelativePath: "", kind: "file" })}>
+            <Icon name="FileText" className="size-4" />
+            New file…
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onCreate({ directoryRelativePath: "", kind: "directory" })}>
+            <Icon name="FolderOpen" className="size-4" />
+            New folder…
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       {root?.status === "error" ? (
@@ -405,9 +428,18 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
               tree={tree}
               chatTargets={chatTargets}
               activeThreadId={threadId}
+              onCreate={onCreate}
             />
           ))
         : null}
+      {createRequest !== null ? (
+        <CreateEntryDialog
+          request={createRequest}
+          workspace={workspace}
+          showCreated={tree.showCreated}
+          onClose={() => setCreateRequest(null)}
+        />
+      ) : null}
     </div>
   );
 }
