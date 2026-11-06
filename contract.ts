@@ -1,5 +1,8 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { directoryChangeSchema } from "./directory-change";
+
+export { directoryChangeSchema };
 
 export const SKIP_DIR_NAMES = new Set([
   ".git",
@@ -114,12 +117,6 @@ export const anchorFixSchema = z.object({
   isDirectory: z.boolean(),
 });
 export type AnchorFix = z.infer<typeof anchorFixSchema>;
-
-export const directoryChangeSchema = z.object({
-  watchId: z.string().uuid(),
-  rootId: z.string().min(1),
-  relativePaths: z.array(z.string().max(4096)).max(256),
-}).strict();
 
 export const rpcContract = defineRpcContract({
   statPath: {
