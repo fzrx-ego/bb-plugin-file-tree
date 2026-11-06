@@ -256,6 +256,20 @@ export const rpcContract = defineRpcContract({
    * Create an empty `untitled.md` (or untitled-2.md, …) in the given folder
    * and return its workspace-relative path so the tree can select and open it.
    */
+  createEntry: {
+    input: z
+      .object({
+        rootId: z.string().min(1),
+        directoryRelativePath: z.string(),
+        name: z.string(),
+        kind: z.enum(["file", "directory"]),
+      })
+      .strict(),
+    output: z.discriminatedUnion("ok", [
+      z.object({ ok: z.literal(true), relativePath: z.string() }),
+      z.object({ ok: z.literal(false), message: z.string() }),
+    ]),
+  },
   createBlankMarkdown: {
     input: z
       .object({
