@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRealtime, useRealtimeConnectionState, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
-import { directoryChangeSchema, type rpcContract } from "../contract";
+import type { rpcContract } from "../contract";
+import { directoryChangeSchema } from "../directory-change";
 
 /** Lease renewal does no listing. Hidden windows hold no watches after cleanup. */
 export function useLiveDirectories(
