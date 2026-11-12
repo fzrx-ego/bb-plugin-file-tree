@@ -123,7 +123,7 @@ export function GlobalFileTreeRail() {
         }}
       />
     </div>
-    <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+    <Button type="button" variant="ghost" size="icon" className={cn("size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5", compact && "size-11")}
       aria-label="Refresh folder list"
       onClick={() => setRefreshCount((count) => count + 1)}>
       <Icon name="RotateCcw" className="size-3.5" />
@@ -144,7 +144,23 @@ export function GlobalFileTreeRail() {
       className="fixed bottom-0 right-0 top-0 z-40 flex-col text-sidebar-foreground"
       style={{
         display: railOpen ? "flex" : "none",
-        width: compact ? "100vw" : framed ? `calc(${railWidthPx}px + ${frame.lip})` : `${railWidthPx}px`,
+        width: compact ? "100%" : framed ? `calc(${railWidthPx}px + ${frame.lip})` : `${railWidthPx}px`,
+        // This body portal sits outside BB's safe-area-padded content shell.
+        // Keep mobile controls clear of the notch/home indicator and above BB's
+        // chrome (44/45), while shared menus and dialogs (50) remain on top.
+        ...(compact
+          ? {
+            boxSizing: "border-box",
+            height: "var(--bb-shell-height, 100dvh)",
+            bottom: "auto",
+            paddingTop: "env(safe-area-inset-top, 0px)",
+            paddingRight: "env(safe-area-inset-right, 0px)",
+            paddingBottom: "var(--bb-safe-area-bottom, env(safe-area-inset-bottom, 0px))",
+            paddingLeft: "env(safe-area-inset-left, 0px)",
+            backgroundColor: "var(--sidebar)",
+            zIndex: 46,
+          }
+          : {}),
         ...(framed
           ? {
             paddingTop: frame.top,
@@ -167,7 +183,7 @@ export function GlobalFileTreeRail() {
       >
         {framed ? null : <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
           {rootControls}
-          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+          <Button type="button" variant="ghost" size="icon" className={cn("size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5", compact && "size-11")}
             aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
             <Icon name="X" className="size-3.5" />
           </Button>
