@@ -118,6 +118,56 @@ export const anchorFixSchema = z.object({
 });
 export type AnchorFix = z.infer<typeof anchorFixSchema>;
 
+export const gitEntrySchema = z.object({
+  relativePath: z.string(), index: z.string(), worktree: z.string(),
+  originalPath: z.string().nullable(),
+});
+export const gitSnapshotSchema = z.object({
+  branch: z.string(),
+  entries: z.array(gitEntrySchema),
+  stashes: z.array(z.string()),
+  stashError: z.string().nullable(),
+  checkedAt: z.number(),
+});
+export const chatChangesSchema = z.object({
+  workspace: workspaceSchema.nullable(),
+  changes: z.array(z.object({
+    path: z.string(), movePath: z.string().nullable(), kind: z.string(),
+    sourceSeqEnd: z.number(), eventId: z.string(),
+  })),
+  hasOlderRows: z.boolean(),
+});
+
+export const folderSizeSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("pending") }),
+  z.object({ state: z.literal("ready"), kib: z.number().int().nonnegative(), checkedAt: z.number(), stale: z.boolean() }),
+  z.object({ state: z.enum(["unavailable", "skipped"]), checkedAt: z.number() }),
+]);
+export const folderSizeDemandId = z.uuid();
+export const folderSizePaths = z.array(z.string().min(1)).max(256);
+export const folderSizesSchema = z.object({
+  sizes: z.record(z.string(), folderSizeSchema),
+  pending: z.number().int().nonnegative(),
+});
+export type FolderSize = z.infer<typeof folderSizeSchema>;
+export type FolderSizes = z.infer<typeof folderSizesSchema>;
+
+export const folderSizesContract = defineRpcContract({
+  folderSizes: {
+    input: z.object({ rootId: z.string().min(1), demandId: folderSizeDemandId, paths: folderSizePaths }).strict(),
+    output: folderSizesSchema,
+  },
+  stopFolderSizes: {
+    input: z.object({ rootId: z.string().min(1), demandId: folderSizeDemandId }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+});
+
+export const changesContract = defineRpcContract({
+  gitSnapshot: { input: z.object({ rootId: z.string() }).strict(), output: gitSnapshotSchema },
+  chatChanges: { input: z.object({ threadId: z.string().min(1) }).strict(), output: chatChangesSchema },
+});
+
 export const rpcContract = defineRpcContract({
   statPath: {
     input: z.object({ rootId: z.string().min(1), relativePath: z.string().max(4096) }).strict(),

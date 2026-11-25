@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBbContext, useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { FileTreePanel } from "@/components/FileTreePanel";
 import { RailResizeHandle } from "@/components/RailResizeHandle";
 import { RootPicker } from "@/components/RootPicker";
 import { TitleBarFileTreeToggle } from "@/components/TitleBarFileTreeToggle";
+import { REQUEST, requestDock } from "@/lib/review-dock-boundary";
 import { acquireRailInset, syncRailInset } from "@/lib/rail-inset";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { RAIL_EVENT, initializeRailOpen, writeStoredOpen } from "@/lib/rail-state";
@@ -15,6 +16,16 @@ import { useRailWidthPx } from "@/lib/rail-width";
 import { cn } from "@/lib/utils";
 import { useWindowFrame } from "@/lib/window-frame";
 import type { RootChoice, rpcContract } from "../contract";
+
+const FOLDER_SIZES_KEY = "bb-plugin-file-tree:folder-sizes";
+
+function readFolderSizes(): boolean {
+  try {
+    return localStorage.getItem(FOLDER_SIZES_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 const ROOT_STORAGE_KEY = "bb-plugin-file-tree:pinned-root";
 
@@ -49,12 +60,15 @@ export function GlobalFileTreeRail() {
   const insetHolderId = useRef(`file-tree:window:${Math.random().toString(36).slice(2)}`).current;
   const initialized = useRef(false);
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"files" | "artifacts">("files");
+  const railId = useId();
   const [ready, setReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(readPinnedRoot);
   const [choices, setChoices] = useState<RootChoice[]>([]);
   const [loadingRoots, setLoadingRoots] = useState(true);
   const [rootError, setRootError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const [showFolderSizes, setShowFolderSizes] = useState(readFolderSizes);
 
   useEffect(() => {
     if (settingsLoading || initialized.current) return;
@@ -67,11 +81,24 @@ export function GlobalFileTreeRail() {
   useEffect(() => {
     const onRailEvent = (event: Event) => {
       const next = (event as CustomEvent<boolean>).detail;
-      if (typeof next === "boolean") setOpen(next);
+      if (typeof next !== "boolean") return;
+      setOpen(next);
+      if (next) setView("files");
+    };
+    const onDockRequest = (event: Event) => {
+      const target = (event as CustomEvent<{ target?: string }>).detail?.target;
+      if (target !== "files" && (target !== "artifacts" || !threadId)) return;
+      event.preventDefault();
+      writeStoredOpen(true);
+      setView(target);
     };
     window.addEventListener(RAIL_EVENT, onRailEvent);
-    return () => window.removeEventListener(RAIL_EVENT, onRailEvent);
-  }, []);
+    window.addEventListener(REQUEST, onDockRequest);
+    return () => {
+      window.removeEventListener(RAIL_EVENT, onRailEvent);
+      window.removeEventListener(REQUEST, onDockRequest);
+    };
+  }, [threadId]);
 
   const pinnedThreadId = selectedId?.startsWith("thread:") ? selectedId.slice(7) : null;
   useEffect(() => {
@@ -104,6 +131,7 @@ export function GlobalFileTreeRail() {
 
   const chosen = choices.find((choice) => choice.id === selectedId);
   const railOpen = ready && open;
+  const showArtifacts = threadId !== null && view === "artifacts";
   useLayoutEffect(() => {
     if (!railOpen || compact) {
       syncRailInset();
@@ -111,6 +139,22 @@ export function GlobalFileTreeRail() {
     }
     return acquireRailInset(insetHolderId);
   }, [compact, insetHolderId, railOpen]);
+
+  const toggleFolderSizes = () => {
+    const next = !showFolderSizes;
+    setShowFolderSizes(next);
+    try {
+      localStorage.setItem(FOLDER_SIZES_KEY, next ? "1" : "0");
+    } catch {
+      // The choice still lasts for this window when storage is unavailable.
+    }
+  };
+
+  const artifactsTitle = (
+    <span className="min-w-0 truncate pl-2 text-sm font-medium text-sidebar-foreground">
+      Артефакты
+    </span>
+  );
 
   const rootControls = <>
     <div className="flex min-w-0 flex-1">
@@ -128,6 +172,17 @@ export function GlobalFileTreeRail() {
       onClick={() => setRefreshCount((count) => count + 1)}>
       <Icon name="RotateCcw" className="size-3.5" />
     </Button>
+    <Button asChild variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground [&_svg]:size-3.5">
+      <button
+        type="button"
+        aria-label="Размеры папок"
+        aria-pressed={showFolderSizes}
+        title={showFolderSizes ? "Размеры папок включены" : "Размеры папок выключены"}
+        onClick={toggleFolderSizes}
+      >
+        <Icon name="Ruler" aria-hidden="true" />
+      </button>
+    </Button>
   </>;
 
   if (!ready) return null;
@@ -135,9 +190,16 @@ export function GlobalFileTreeRail() {
   // content card beside it, and its toggle joins BB's title-bar buttons.
   const framed = frame !== null && !compact;
   return <>
-    {framed ? <TitleBarFileTreeToggle open={railOpen} railWidthPx={railWidthPx} frameLip={frame.lip}>
-      {rootControls}
-    </TitleBarFileTreeToggle> : null}
+    {framed ? (
+      <TitleBarFileTreeToggle
+        open={railOpen}
+        showingArtifacts={railOpen && showArtifacts}
+        railWidthPx={railWidthPx}
+        frameLip={frame.lip}
+      >
+        {showArtifacts ? artifactsTitle : rootControls}
+      </TitleBarFileTreeToggle>
+    ) : null}
     {createPortal(
     <aside
       {...portalScopeProps}
@@ -156,6 +218,7 @@ export function GlobalFileTreeRail() {
           : {}),
       }}
       aria-label="File tree"
+      data-bb-right-rail=""
     >
       {compact ? null : <RailResizeHandle />}
       <div
@@ -166,15 +229,37 @@ export function GlobalFileTreeRail() {
         style={framed ? { borderColor: "var(--border-seam)" } : undefined}
       >
         {framed ? null : <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-sidebar-border pl-1.5 pr-1.5">
-          {rootControls}
-          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
-            aria-label="Hide file tree" onClick={() => writeStoredOpen(false)}>
+          {showArtifacts ? artifactsTitle : rootControls}
+          <Button type="button" variant="ghost" size="icon" className="ml-auto size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+            aria-label={showArtifacts ? "Скрыть артефакты" : "Hide file tree"} onClick={() => writeStoredOpen(false)}>
             <Icon name="X" className="size-3.5" />
           </Button>
         </div>}
-        {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
-        {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
-        <FileTreePanel root={chosen?.workspace ?? null} enabled={railOpen} refreshCount={refreshCount} />
+        <div hidden={showArtifacts} className={cn("min-h-0 flex-1 flex-col", !showArtifacts && "flex")}>
+          {rootError !== null ? <p className="px-2 py-2 text-[11px] text-destructive">{rootError}</p> : null}
+          {loadingRoots && choices.length === 0 ? <p className="px-2 py-2 text-[11px] text-muted-foreground">Loading folders…</p> : null}
+          <FileTreePanel
+            root={chosen?.workspace ?? null}
+            enabled={railOpen && !showArtifacts}
+            refreshCount={refreshCount}
+            showFolderSizes={showFolderSizes}
+          />
+        </div>
+        <div
+          hidden={!showArtifacts}
+          className="min-h-0 flex-1 overflow-hidden"
+          data-bb-review-anchor="artifacts"
+          data-bb-dock-active={railOpen && showArtifacts ? "1" : "0"}
+          data-bb-dock-thread={threadId ?? ""}
+          data-bb-dock-project={projectId ?? ""}
+          data-bb-dock-epoch={JSON.stringify([railId, threadId, projectId])}
+        />
+        {threadId && <nav aria-label="Правая панель" className="flex shrink-0 gap-1 border-t border-sidebar-border p-1">
+          <Button type="button" variant={showArtifacts ? "ghost" : "secondary"} size="sm"
+            className="flex-1" aria-pressed={!showArtifacts} onClick={() => requestDock("files")}>Файлы</Button>
+          <Button type="button" variant={showArtifacts ? "secondary" : "ghost"} size="sm"
+            className="flex-1" aria-pressed={showArtifacts} onClick={() => requestDock("artifacts")}>Артефакты</Button>
+        </nav>}
       </div>
     </aside>,
     document.body,

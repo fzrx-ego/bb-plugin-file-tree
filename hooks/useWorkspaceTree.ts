@@ -1,3 +1,4 @@
+import { parseFolderColors } from "@/lib/folder-colors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -33,6 +34,7 @@ export function useWorkspaceTree(root: Workspace | null, enabled = true) {
   const rpc = useRpc<typeof rpcContract>();
   const { values, isLoading: settingsLoading } = useSettings();
   const showSkipped = values?.showSkipped === true;
+  const folderColors = useMemo(() => parseFolderColors(typeof values?.folderColors === "string" ? values.folderColors : ""), [values?.folderColors]);
   const [rerooted, setRerooted] = useState<Workspace | null>(null);
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
   const dirsRef = useRef(dirs);
@@ -288,7 +290,9 @@ export function useWorkspaceTree(root: Workspace | null, enabled = true) {
   }, [expanded, loadDir, rerooted]);
 
   return {
+    folderColors,
     settingsLoading,
+    showChangesPanel: values?.showChangesPanel !== false,
     active,
     isRerooted: rerooted !== null,
     dirs: visibleDirs,

@@ -12,10 +12,12 @@ export function FileTreePanel({
   root,
   enabled = true,
   refreshCount = 0,
+  showFolderSizes = false,
 }: {
   root: Workspace | null;
   enabled?: boolean;
   refreshCount?: number;
+  showFolderSizes?: boolean;
 }) {
   const tree = useWorkspaceTree(root, enabled);
   const reloadRef = useRef(tree.reload);
@@ -32,7 +34,7 @@ export function FileTreePanel({
       {search.isActive ? (
         <FileTreeSearchResults search={search} />
       ) : (
-        <FileTreeBody tree={tree} />
+        <FileTreeBody tree={tree} enabled={enabled} showFolderSizes={showFolderSizes} />
       )}
     </div>
   );

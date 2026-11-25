@@ -505,7 +505,16 @@ export async function resolveFileAnchors(
       hostId: workspace.hostId,
       paths: [anchor.href],
     });
-    if (existing.existence[anchor.href] === true) return null;
+    if (existing.existence[anchor.href] === true) {
+      // Folder links have no document preview. Their click should reveal the
+      // exact directory, including descriptive links with an absolute href.
+      const target = await resolveInWorkspace(bb, { threadId: input.threadId, path: anchor.href }, getSearchRoots, probe);
+      if (!target.ok || !target.isDirectory) return null;
+      const absolutePath = absoluteUnder(target.root?.rootPath ?? workspace.rootPath, target.relativePath);
+      return absolutePath === null ? null : {
+        ...anchor, absolutePath, hostId: target.root?.hostId ?? workspace.hostId, isDirectory: true,
+      };
+    }
 
     const here = await resolveOne(bb, workspace, anchor.text, probe);
     if (here !== null) {
@@ -583,7 +592,9 @@ async function candidateRoots(
     const key = `${hostId}\n${rootPath}`;
     if (rootPath === "" || seen.has(key)) return;
     seen.add(key);
-    roots.push({ hostId, rootPath, rootName, rootId: registerRoot(hostId, rootPath) });
+    // Looking through a large configured folder must not evict the pinned
+    // tree's root. Allocate a registry id only when this candidate is used.
+    roots.push({ hostId, rootPath, rootName, get rootId() { return registerRoot(hostId, rootPath); } });
   };
 
   try {
@@ -662,7 +673,12 @@ async function findOutsideWorkspace(
   getSearchRoots: SearchRootsGetter,
   probe: PathProbe,
 ): Promise<{ relativePath: string; isDirectory: boolean; root: RevealRoot; ancestor: boolean } | null> {
-  const roots = await candidateRoots(bb, currentRoot, fallbackHostId, getSearchRoots);
+  const candidates = await candidateRoots(bb, currentRoot, fallbackHostId, getSearchRoots);
+  // An absolute link should show its nearest configured folder, rather than
+  // opening a broad storage root with thousands of unrelated threads.
+  const roots = path.isAbsolute(expandHome(raw.trim()))
+    ? [...candidates].sort((a, b) => b.rootPath.length - a.rootPath.length)
+    : candidates;
 
   // Exact matches everywhere before any nearest-ancestor guess, so a real hit
   // in a later root always beats an approximate one in an earlier root.
@@ -681,7 +697,7 @@ async function findOutsideWorkspace(
       }
     }
   }
-  const named = raw.includes("/") ? null : await findByName(await localIndexRoots(bb, roots), raw);
+  const named = await findByName(await localIndexRoots(bb, roots), raw);
   if (named !== null) {
     const verified = await probe(named.root.hostId, named.root.rootPath, named.relativePath);
     if (verified !== null) return { ...named, isDirectory: verified.isDirectory, ancestor: false };

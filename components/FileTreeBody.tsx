@@ -1,6 +1,11 @@
+import { folderColorFor } from "@/lib/folder-colors";
+import { folderSizeLabel } from "@/lib/folder-size-format";
+import { useFolderSizes } from "@/hooks/useFolderSizes";
+import type { FolderSizes } from "../contract";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useBbContext, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
+import { ChangesPanel } from "@/components/ChangesPanel";
 import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Icon } from "@/components/ui/icon";
 import {
@@ -82,6 +87,7 @@ function TreeRow({
   depth,
   workspace,
   tree,
+  folderSizes,
   chatTargets,
   activeThreadId,
 }: {
@@ -89,6 +95,7 @@ function TreeRow({
   depth: number;
   workspace: Workspace;
   tree: TreeModel;
+  folderSizes: FolderSizes["sizes"];
   chatTargets: readonly ChatTarget[];
   activeThreadId: string | null;
 }) {
@@ -96,6 +103,10 @@ function TreeRow({
   const { threadId } = useBbContext();
   const rpc = useRpc<typeof rpcContract>();
   const isDir = entry.kind === "directory";
+  const measured = isDir && Object.hasOwn(folderSizes, entry.relativePath)
+    ? folderSizes[entry.relativePath] : undefined;
+  const size = measured && folderSizeLabel(measured);
+  const folderColor = isDir ? folderColorFor(entry.relativePath, tree.folderColors) : undefined;
   const isOpen = isDir && tree.expanded.has(entry.relativePath);
   const isSelected = tree.selected === entry.relativePath;
   const childState = isOpen ? tree.dirs[entry.relativePath] : undefined;
@@ -221,7 +232,13 @@ function TreeRow({
               "hover:bg-state-hover",
               isSelected && "bg-state-active font-medium",
             )}
-            style={{ paddingLeft: 4 + depth * 10 }}
+            style={{
+              paddingLeft: 4 + depth * 10,
+              ...(folderColor ? {
+                boxShadow: `inset 2px 0 ${folderColor}`,
+                backgroundColor: isSelected ? undefined : `color-mix(in srgb, ${folderColor} 12%, transparent)`,
+              } : {}),
+            }}
           >
             <span className="flex size-3 shrink-0 items-center justify-center text-muted-foreground">
               {isDir ? (
@@ -231,10 +248,18 @@ function TreeRow({
                 />
               ) : null}
             </span>
-            {isDir ? null : (
+            {isDir ? (
+              <Icon
+                name={isOpen ? "FolderOpen" : "Folder"}
+                className="size-3 shrink-0 text-muted-foreground"
+                style={folderColor ? { color: folderColor } : undefined}
+              />
+            ) : (
               <FileTypeIcon name={entry.name} className="size-3" />
             )}
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            {size && <span data-folder-size={measured.state} title={size.title}
+              className="shrink-0 tabular-nums text-muted-foreground">{size.text}</span>}
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-56">
@@ -324,6 +349,7 @@ function TreeRow({
               depth={depth + 1}
               workspace={workspace}
               tree={tree}
+              folderSizes={folderSizes}
               chatTargets={chatTargets}
               activeThreadId={activeThreadId}
             />
@@ -333,11 +359,16 @@ function TreeRow({
   );
 }
 
-export function FileTreeBody({ tree }: { tree: TreeModel }) {
+export function FileTreeBody({ tree, enabled, showFolderSizes }: {
+  tree: TreeModel;
+  enabled: boolean;
+  showFolderSizes: boolean;
+}) {
   const overlayNavigate = useBbNavigate();
   const rpc = useRpc<typeof rpcContract>();
   const { threadId } = useBbContext();
   const chatTargets = useSyncExternalStore(subscribeChatTargets, getChatTargets, getChatTargets);
+  const folderSizes = useFolderSizes(tree, enabled && showFolderSizes && !tree.settingsLoading);
 
   if (tree.settingsLoading) {
     return (
@@ -392,6 +423,9 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {tree.showChangesPanel && (
+        <ChangesPanel tree={tree} workspace={workspace} threadId={threadId} enabled={enabled} />
+      )}
       {root?.status === "error" ? (
         <p className="px-2 text-[11px] text-destructive">{root.message}</p>
       ) : null}
@@ -403,6 +437,7 @@ export function FileTreeBody({ tree }: { tree: TreeModel }) {
               depth={0}
               workspace={workspace}
               tree={tree}
+              folderSizes={folderSizes}
               chatTargets={chatTargets}
               activeThreadId={threadId}
             />

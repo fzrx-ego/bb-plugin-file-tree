@@ -14,16 +14,19 @@ const TITLE_BAR_RULE = `[data-testid="app-window-title-bar"]{padding-right:calc(
 
 export function TitleBarFileTreeToggle({
   open,
+  showingArtifacts,
   railWidthPx,
   frameLip,
   children,
 }: {
   open: boolean;
+  showingArtifacts: boolean;
   railWidthPx: number;
   frameLip: string;
   children: ReactNode;
 }) {
   const portalScopeProps = usePortalScopeProps();
+  const label = showingArtifacts ? "Скрыть артефакты" : open ? "Hide file tree" : "Show file tree";
 
   useLayoutEffect(() => {
     const style = document.createElement("style");
@@ -57,12 +60,12 @@ export function TitleBarFileTreeToggle({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-7 shrink-0 rounded-md p-0"
-        aria-label={open ? "Hide file tree" : "Show file tree"}
+        className="ml-auto size-7 shrink-0 rounded-md p-0"
+        aria-label={label}
         aria-pressed={open}
         onClick={toggleRailOpen}
       >
-        <Icon name="FolderTree" className="size-4" />
+        <Icon name={showingArtifacts ? "Layers" : "FolderTree"} className="size-4" aria-hidden="true" />
       </Button>
     </div>,
     document.body,
