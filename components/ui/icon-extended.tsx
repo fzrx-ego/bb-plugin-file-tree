@@ -94,7 +94,7 @@ import {
   ViewOffIcon,
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
-} from "@hugeicons/core-free-icons";
+} from "../../vendor/hugeicons/icons";
 import { type ExtendedIconMap, registerExtendedIcons } from "./icon-registry";
 
 // Extended glyph registry: every named icon the shell does not need before

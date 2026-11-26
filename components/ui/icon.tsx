@@ -43,7 +43,7 @@ import {
   UserAdd01Icon,
   WorkflowCircle03Icon,
   ZapIcon,
-} from "@hugeicons/core-free-icons";
+} from "../../vendor/hugeicons/icons";
 import { useSyncExternalStore } from "react";
 import { cn } from "../../lib/utils";
 import {
