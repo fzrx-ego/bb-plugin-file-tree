@@ -34,9 +34,9 @@ const FIXED_ATTR = "data-file-tree-fixed";
 const CHAT_MESSAGE_SELECTOR = ".group\\/message";
 
 /** Nodes of `selector` that sit inside a rendered message, not the whole document. */
-function chatQuery<T extends Element>(selector: string): T[] {
+function chatQuery<T extends Element>(selector: string, scope: Document | Element): T[] {
   const found: T[] = [];
-  const messages = document.querySelectorAll(CHAT_MESSAGE_SELECTOR);
+  const messages = scope.querySelectorAll(CHAT_MESSAGE_SELECTOR);
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i];
     if (message === undefined) continue;
@@ -47,6 +47,14 @@ function chatQuery<T extends Element>(selector: string): T[] {
     }
   }
   return found;
+}
+
+/** The closest pane containing this header's transcript owns its buttons. */
+export function chatScopeFromHeader(marker: Element): Document | Element {
+  for (let parent = marker.parentElement; parent !== null; parent = parent.parentElement) {
+    if (parent.querySelector("[data-thread-window]") !== null) return parent;
+  }
+  return marker.ownerDocument;
 }
 
 /**
@@ -94,8 +102,9 @@ function makeButton(path: string): HTMLButtonElement {
   button.type = "button";
   button.setAttribute(BUTTON_ATTR, "");
   button.dataset[PATH_ATTR] = path;
-  button.title = `Reveal in the file tree: ${path}`;
-  button.setAttribute("aria-label", `Reveal in the file tree: ${path}`);
+  button.setAttribute("data-clipboard-ignore", "");
+  button.title = `Показать в дереве файлов: ${path}`;
+  button.setAttribute("aria-label", `Показать в дереве файлов: ${path}`);
   button.innerHTML = ICON_SVG;
   button.style.cssText = [
     "display:inline-flex",
@@ -202,8 +211,10 @@ export function mountChatPathButtons(
   resolveAnchors: AnchorResolver,
   openFixed: FixedOpener,
   report: Reporter = () => undefined,
+  scope: Document | Element = document,
 ): void {
   /** path → exists in the workspace. Absent means "not asked yet". */
+  const ownedButtons = new Set<Element>();
   const known = verdictCache.recall(threadId);
   const pending = new Set<string>();
   let flushTimer: number | null = null;
@@ -215,18 +226,22 @@ export function mountChatPathButtons(
       if ((existing as HTMLElement).dataset[PATH_ATTR] === path) return;
       existing.remove();
     }
-    code.appendChild(makeButton(path));
+    const button = makeButton(path);
+    ownedButtons.add(button);
+    code.appendChild(button);
   };
 
   /**
    * key → the file bb's link should have pointed at, or null when bb's own
    * link is fine (or nothing better exists) and the click stays bb's.
    */
+  const ownedFixes = new Set<HTMLAnchorElement>();
   const anchorFixes = anchorCache.recall(threadId);
   const pendingAnchors = new Map<string, { text: string; href: string }>();
   let anchorTimer: number | null = null;
 
   const applyFix = (anchor: HTMLAnchorElement, fix: AnchorFix): void => {
+    ownedFixes.add(anchor);
     anchor.setAttribute(FIXED_ATTR, "");
     anchor.dataset.fileTreeFixedPath = fix.absolutePath;
     anchor.dataset.fileTreeFixedHost = fix.hostId;
@@ -244,7 +259,7 @@ export function mountChatPathButtons(
 
   const sweepAnchors = (): void => {
     expireLocal(anchorFixes, anchorCache.recall(threadId));
-    for (const anchor of chatQuery<HTMLAnchorElement>('a[href^="file:"]')) {
+    for (const anchor of chatQuery<HTMLAnchorElement>('a[href]', scope)) {
       const href = anchorTargetPath(anchor);
       const text = textOf(anchor);
       if (href === null || text === "") {
@@ -318,7 +333,7 @@ export function mountChatPathButtons(
     // gives them its own "open" glyph, which is a different action from
     // revealing the file in the tree.
     sweepAnchors();
-    for (const code of chatQuery<Element>("code, a")) {
+    for (const code of chatQuery<Element>("code, a", scope)) {
       // A `<code>` inside an `<a>` matches twice; let the inner one win so the
       // path gets one button, not two.
       const previewPath = code instanceof HTMLAnchorElement
@@ -341,6 +356,8 @@ export function mountChatPathButtons(
         code.querySelector(`button[${BUTTON_ATTR}]`)?.remove();
         continue;
       }
+      const oldButton = code.querySelector<HTMLElement>(`button[${BUTTON_ATTR}]`);
+      if (oldButton !== null && oldButton.dataset[PATH_ATTR] !== path) oldButton.remove();
       candidates += 1;
       // The repaired path is a file resolveFileAnchors already found.
       if (stored !== undefined && stored !== null) {
@@ -361,11 +378,11 @@ export function mountChatPathButtons(
 
     // A live chat mutates constantly, so only report when the numbers that
     // actually matter move — otherwise this logs once a second forever.
-    const present = document.querySelectorAll(`button[${BUTTON_ATTR}]`).length;
+    const present = scope.querySelectorAll(`button[${BUTTON_ATTR}]`).length;
     const line = `sweep known=${wanted} buttonsInDom=${present}`;
     if (line !== lastReport) {
       lastReport = line;
-      report(`${line} (codes=${codes} candidates=${candidates})`);
+      report(`[${threadId}] ${line} (codes=${codes} candidates=${candidates})`);
     }
     if (sweepAgain) {
       sweepAgain = false;
@@ -427,7 +444,8 @@ export function mountChatPathButtons(
 
   const buttonFrom = (target: EventTarget | null): HTMLElement | null => {
     if (target === null || !(target instanceof Element)) return null;
-    return target.closest<HTMLElement>(`button[${BUTTON_ATTR}]`);
+    const button = target.closest<HTMLElement>(`button[${BUTTON_ATTR}]`);
+    return button !== null && ownedButtons.has(button) ? button : null;
   };
 
   /**
@@ -438,7 +456,8 @@ export function mountChatPathButtons(
    */
   const fixedAnchorFrom = (target: EventTarget | null): HTMLElement | null => {
     if (target === null || !(target instanceof Element)) return null;
-    return target.closest<HTMLElement>(`a[${FIXED_ATTR}]`);
+    const anchor = target.closest<HTMLAnchorElement>(`a[${FIXED_ATTR}]`);
+    return anchor !== null && ownedFixes.has(anchor) ? anchor : null;
   };
 
   const onEarly = (event: Event): void => {
@@ -476,7 +495,7 @@ export function mountChatPathButtons(
     writeStoredOpen(true);
     if (isDirectory) {
       // A folder has no preview; showing it in the tree is the whole action.
-      requestReveal(textOf(anchor), threadId);
+      requestReveal(absolutePath, threadId);
       return;
     }
     openFixed({
@@ -502,7 +521,7 @@ export function mountChatPathButtons(
 
   const insideChat = (node: Node): boolean => {
     const element = node instanceof Element ? node : node.parentElement;
-    if (element === null) return false;
+    if (element === null || !scope.contains(element)) return false;
     return element.closest(CHAT_MESSAGE_SELECTOR) !== null;
   };
 
@@ -526,7 +545,7 @@ export function mountChatPathButtons(
     );
     if (relevant) queueSweep();
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(scope.nodeType === Node.DOCUMENT_NODE ? (scope as Document).body : scope, { childList: true, subtree: true, attributes: true, attributeFilter: ["href"] });
   signal.addEventListener(
     "abort",
     () => {
@@ -534,16 +553,10 @@ export function mountChatPathButtons(
       if (sweepTimer !== null) window.clearTimeout(sweepTimer);
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       if (anchorTimer !== null) window.clearTimeout(anchorTimer);
-      for (const button of Array.from(
-        document.querySelectorAll(`button[${BUTTON_ATTR}]`),
-      )) {
-        button.remove();
-      }
-      for (const anchor of Array.from(
-        document.querySelectorAll<HTMLAnchorElement>(`a[${FIXED_ATTR}]`),
-      )) {
-        clearFix(anchor);
-      }
+      for (const button of ownedButtons) button.remove();
+      ownedButtons.clear();
+      for (const anchor of ownedFixes) clearFix(anchor);
+      ownedFixes.clear();
     },
     { once: true },
   );

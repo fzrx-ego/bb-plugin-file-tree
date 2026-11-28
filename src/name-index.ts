@@ -299,10 +299,9 @@ function wantedSegments(raw: string): string[] | null {
   if (segments.length === 0) return null;
   if (segments.some((segment) => segment === "..")) return null;
   const last = segments[segments.length - 1];
-  // Only a file name can be looked up this way. `rules` or `skills` is a real
-  // folder in one project and an English word in the next sentence, and the
-  // index cannot tell them apart — those still resolve by position only.
-  if (last === undefined || !hasFileExtension(last)) return null;
+  // File names, multi-segment paths, and distinctive folder names can be
+  // looked up by their complete suffix. Bare prose still resolves by position.
+  if (last === undefined || (!hasFileExtension(last) && segments.length === 1 && !last.includes("-"))) return null;
   return segments.map((segment) => segment.toLowerCase());
 }
 
@@ -366,8 +365,12 @@ export async function findByName(
   }
   const name = wanted[wanted.length - 1];
   if (name === undefined) return null;
-  const candidates = index.byName.get(name);
-  if (candidates === undefined) return null;
+  // Directory snapshots already come from the same bounded walk. Indexing
+  // their names here supports shortened folder paths without another scan.
+  const directories = Array.from(index.snaps.keys())
+    .filter((dir) => path.basename(dir).toLowerCase() === name)
+    .map((absolutePath) => ({ absolutePath, ...describe(absolutePath) }));
+  const candidates = [...(index.byName.get(name) ?? []), ...directories];
   const matches =
     wanted.length === 1
       ? candidates
@@ -381,7 +384,7 @@ export async function findByName(
     .split(path.sep)
     .join("/");
   if (relativePath === "" || relativePath.startsWith("..")) return null;
-  return { relativePath, isDirectory: false, root };
+  return { relativePath, isDirectory: index.snaps.has(hit.absolutePath), root };
 }
 
 /* ---------------------------------------------------------------------- *

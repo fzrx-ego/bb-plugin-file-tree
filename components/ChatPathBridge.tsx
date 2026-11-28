@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
-import { mountChatPathButtons } from "@/lib/chat-path-buttons";
+import { chatScopeFromHeader, mountChatPathButtons } from "@/lib/chat-path-buttons";
 import { registerSurfaceNavigation } from "@/lib/surface-navigation";
 import type { rpcContract } from "../contract";
 
@@ -16,6 +16,7 @@ import type { rpcContract } from "../contract";
  * not remove a DOM button between pointerdown and click.
  */
 export function ChatPathBridge({ threadId }: { threadId: string }) {
+  const mountPoint = useRef<HTMLSpanElement>(null);
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
 
@@ -25,6 +26,8 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
   useEffect(() => registerSurfaceNavigation(threadId, navigate), [navigate, threadId]);
 
   useEffect(() => {
+    const marker = mountPoint.current;
+    if (marker === null) return;
     const controller = new AbortController();
     mountChatPathButtons(
       controller.signal,
@@ -51,11 +54,12 @@ export function ChatPathBridge({ threadId }: { threadId: string }) {
       (message) => {
         void runtime.current.rpc.call("clientLog", { message }).catch(() => undefined);
       },
+      chatScopeFromHeader(marker),
     );
     return () => {
       controller.abort();
     };
   }, [threadId]);
 
-  return null;
+  return <span ref={mountPoint} hidden data-file-tree-chat-bridge={threadId} />;
 }

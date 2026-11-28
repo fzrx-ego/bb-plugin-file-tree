@@ -1,5 +1,8 @@
+import { z } from "zod";
+import { parseFolderColors } from "./lib/folder-colors";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { rpcContract } from "./contract";
+import { changesContract, folderSizesContract, rpcContract } from "./contract";
+import { createChatChangesReader } from "./src/chat-changes";
 import { hostContract, hostSignals } from "./host-contract";
 import type { PathProbe } from "./src/reveal";
 import { createBlankMarkdown } from "./src/blank-markdown";
@@ -44,10 +47,26 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       label: "Show the pinned file tree when BB opens",
       default: true,
     },
+    showChangesPanel: {
+      type: "boolean",
+      label: "Показывать блок «Изменения чата · Git»",
+      default: true,
+    },
     showSkipped: {
       type: "boolean",
       label: "Show hidden and ignored folders (.claude, node_modules, .git, …)",
       default: false,
+    },
+    folderColors: {
+      type: "string",
+      label: "Folder colors",
+      description: "One rule per line: Strategy = purple or Product = blue. Colors: red, orange, yellow, green, teal, blue, purple, pink or #RRGGBB. Names match at any depth, ignoring case; use a root-relative path for a specific folder. Clear to remove colors.",
+      experimental_multiline: true,
+      experimental_schema: z.string().superRefine((value, ctx) => {
+        try { parseFolderColors(value); }
+        catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) }); }
+      }),
+      default: "",
     },
     treeRoot: {
       type: "string",
@@ -75,6 +94,28 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     const root = typeof values.treeRoot === "string" ? values.treeRoot.trim() : "";
     return root === "" ? undefined : root;
   };
+
+  const readChatChanges = createChatChangesReader(bb, getTreeRoot);
+  bb.rpc.register(folderSizesContract, {
+    folderSizes: async ({ rootId, demandId, paths }) => {
+      const root = resolveRoot(rootId);
+      if (!root) throw new Error("File tree root expired. Choose the folder again.");
+      return host.call("folderSizes", { rootPath: root.rootPath, demandId, paths }, { hostId: root.hostId });
+    },
+    stopFolderSizes: async ({ rootId, demandId }) => {
+      const root = resolveRoot(rootId);
+      if (!root) return { ok: true as const };
+      return host.call("stopFolderSizes", { demandId }, { hostId: root.hostId });
+    },
+  });
+  bb.rpc.register(changesContract, {
+    gitSnapshot: async ({ rootId }) => {
+      const root = resolveRoot(rootId);
+      if (!root) throw new Error("Выберите папку заново.");
+      return host.call("gitSnapshot", { rootPath: root.rootPath }, { hostId: root.hostId });
+    },
+    chatChanges: ({ threadId }) => readChatChanges(threadId),
+  });
 
   bb.rpc.register(rpcContract, {
     statPath: async ({ rootId, relativePath }) => {

@@ -20,12 +20,16 @@ Or search **File Tree** in BB Community.
 - Drag the tree's left edge to resize it. Double-click the edge to reset the width.
 - `File tree: find a file` in the command palette opens the panel with the search box focused.
 - Files show Seti-style type icons (markdown, JSON, git, `.env`, README, TypeScript, …), as in Cursor. Folders keep only the chevron.
+- Use the **Размеры папок** ruler icon beside Refresh in the File Tree toolbar to show allocated disk space next to folders. The toggle starts off and BB remembers the last selection when the window opens. File Tree measures one folder at a time per host and caches results for ten minutes. `…` means a measurement is pending and `?` means it is unavailable. Turning sizes off releases that window’s requests. A measurement continues while another window still needs it.
 - In a thread or on the New Thread page, click a file to open BB's default preview. On the New Thread page BB previews only files of the thread environment; open a file of another project from a thread.
 - Right-click a file to open it in the external editor when the current BB page has no preview panel.
 - Right-click a Markdown file and choose Open in preview to see it in BB's standard preview when Markdown PRO would open it in its editor.
 - Right-click to add the absolute path to an open chat draft, create a blank `.md` in that folder, delete a file, copy a relative or absolute path, copy the file itself, or reveal it in Finder. When several drafts are open, choose the target in the file menu. Right-click the root name at the top of the tree to create the file there. A new markdown file is named `untitled.md` (or `untitled-2.md`, …) and opens in the external editor so you can paste into it. Delete asks for confirmation and only applies to files, not folders.
 - File links to documents in the current thread storage also have a reveal-in-tree button, including PDF and ZIP links with descriptive labels.
+- Shortened folder paths such as `AI-Adoption/External-Talks` and `AI-Adoption` receive the same button when the folder exists under a search root. Folder links reveal their absolute target in the tree. Buttons belong to their thread pane and remain independent when another pane closes.
 - Paths written in chat can jump the tree to that file, and so do bare file names like `AGENTS-base.md`. Search roots (default `~/Documents`) cover folders outside the current checkout.
+- Open **Изменения чата · Git** above the tree. **Этот чат** lists completed file-change events that BB recorded for the current thread. **Git этой папки** reads the pinned folder's Git index and working tree and shows the repository stash. Click a path to reveal it. Shell-only writes can appear in the Git view even when BB recorded no file-change event.
+- When the Review Artifacts plugin is installed and enabled, **Файлы** and **Артефакты** at the bottom of the right panel switch between the tree and its panel. Without it the switch is hidden.
 
 Copy File uses the macOS or Windows file clipboard. Open in Finder uses macOS `open -R`. These actions are available for files on this computer.
 
@@ -36,9 +40,13 @@ bb plugin config file-tree
 ```
 
 - Show the pinned tree when BB opens
+- **Показывать блок «Изменения чата · Git»** (`showChangesPanel`) — show or hide the changes panel above the file list. On by default.
 - Show hidden and ignored folders (`.claude`, `node_modules`, `.git`, …)
+- Folder colors — one rule per line, e.g. `Strategy = purple` and `Product = blue`. Available colors: red, orange, yellow, green, teal, blue, purple, pink, or a six-digit hex color such as `#3b82f6`. Names match exactly at any depth, ignoring case. A root-relative path such as `Docs/Strategy` targets a specific folder and takes priority over name rules; later rules win ties. Only matching folder rows receive a colored icon, stripe and subtle background. Clear the field to remove colors.
 - Root folder for personal threads — set `~/Documents` to offer it as a pinned folder. Project sources and thread workspaces are also available in the folder selector.
 - Folders to search for paths mentioned in chat
+
+Include `~/.bb/thread-storage` alongside `~/Documents` in the search roots to reveal shared BB work files outside the current thread's storage. Absolute links select the nearest matching folder. Searching a large storage directory preserves the pinned tree's root.
 
 ## Develop
 
